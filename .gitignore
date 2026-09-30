@@ -1,0 +1,14 @@
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# OS/editor files
+.DS_Store
+.vscode/

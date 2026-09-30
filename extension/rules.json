@@ -1,0 +1,196 @@
+[
+  {
+    "id": 1,
+    "priority": 100,
+    "action": { "type": "allow" },
+    "condition": {
+      "requestDomains": ["freebuff.com"]
+    }
+  },
+
+  {
+    "id": 10,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "initiatorDomains": ["freebuff.com"],
+      "requestDomains": [
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googlesyndication.net",
+        "googleadservices.com",
+        "adservice.google.com",
+        "google-analytics.com",
+        "googletagmanager.com"
+      ],
+      "resourceTypes": [
+        "sub_frame",
+        "stylesheet",
+        "script",
+        "image",
+        "font",
+        "object",
+        "xmlhttprequest",
+        "ping",
+        "media",
+        "websocket",
+        "other"
+      ]
+    }
+  },
+
+  {
+    "id": 11,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "initiatorDomains": ["freebuff.com"],
+      "requestDomains": ["amazon-adsystem.com"],
+      "resourceTypes": [
+        "sub_frame",
+        "stylesheet",
+        "script",
+        "image",
+        "font",
+        "object",
+        "xmlhttprequest",
+        "ping",
+        "media",
+        "websocket",
+        "other"
+      ]
+    }
+  },
+
+  {
+    "id": 12,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "initiatorDomains": ["freebuff.com"],
+      "requestDomains": [
+        "adnxs.com",
+        "pubmatic.com",
+        "rubiconproject.com",
+        "openx.net",
+        "smartadserver.com",
+        "yieldmo.com",
+        "media.net",
+        "criteo.com",
+        "casalemedia.com",
+        "indexexchange.com",
+        "sharethrough.com",
+        "triplelift.com",
+        "teads.tv",
+        "moatads.com"
+      ],
+      "resourceTypes": [
+        "sub_frame",
+        "stylesheet",
+        "script",
+        "image",
+        "font",
+        "object",
+        "xmlhttprequest",
+        "ping",
+        "media",
+        "websocket",
+        "other"
+      ]
+    }
+  },
+
+  {
+    "id": 13,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "initiatorDomains": ["freebuff.com"],
+      "requestDomains": [
+        "taboola.com",
+        "outbrain.com",
+        "mgid.com",
+        "revcontent.com"
+      ],
+      "resourceTypes": [
+        "sub_frame",
+        "stylesheet",
+        "script",
+        "image",
+        "font",
+        "object",
+        "xmlhttprequest",
+        "ping",
+        "media",
+        "websocket",
+        "other"
+      ]
+    }
+  },
+
+  {
+    "id": 15,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "initiatorDomains": ["freebuff.com"],
+      "urlFilter": "/ads/",
+      "resourceTypes": [
+        "sub_frame",
+        "stylesheet",
+        "script",
+        "image",
+        "font",
+        "object",
+        "xmlhttprequest",
+        "ping",
+        "media",
+        "other"
+      ]
+    }
+  },
+
+  {
+    "id": 16,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "initiatorDomains": ["freebuff.com"],
+      "urlFilter": "/adserver",
+      "resourceTypes": [
+        "sub_frame",
+        "stylesheet",
+        "script",
+        "image",
+        "font",
+        "object",
+        "xmlhttprequest",
+        "ping",
+        "media",
+        "other"
+      ]
+    }
+  },
+
+  {
+    "id": 17,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "initiatorDomains": ["freebuff.com"],
+      "urlFilter": "/advert",
+      "resourceTypes": [
+        "sub_frame",
+        "stylesheet",
+        "script",
+        "image",
+        "font",
+        "object",
+        "xmlhttprequest",
+        "ping",
+        "media",
+        "other"
+      ]
+    }
+  }
+]

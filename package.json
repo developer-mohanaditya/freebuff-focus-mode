@@ -1,0 +1,15 @@
+{
+  "name": "freebuff-ad-block",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Chromium MV3 extension that blocks ads on freebuff.com, plus its install page.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "preview": "node scripts/build.mjs && node scripts/serve.mjs",
+    "start": "node scripts/serve.mjs",
+    "icons": "node scripts/gen-icons.mjs",
+    "validate": "node scripts/validate.mjs",
+    "check": "node --check scripts/build.mjs && node --check scripts/serve.mjs && node --check scripts/zip.mjs && node --check scripts/png.mjs && node --check scripts/validate.mjs"
+  }
+}

@@ -1,0 +1,22 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!--
+  Chromium update manifest for Freebuff Ad Block.
+
+  BEFORE THIS FEED GOES LIVE:
+    1. Replace YOUR_EXTENSION_ID_HERE with the real 32-character extension ID
+       (chrome://extensions -> Details -> ID) of the PACKED extension.
+    2. Publish the extension's .crx and point codebase at it. A .zip is only a
+       placeholder here - Chrome installs from an update feed expect a CRX.
+    3. Make sure SITE_ORIGIN (scripts/build.mjs) matches the domain this file
+       is actually served from.
+
+  Chrome only consults this feed for extensions installed FROM it, i.e. via a
+  managed ExtensionInstallForcelist policy or the Chrome Web Store. An
+  extension loaded unpacked never reads it. See the Auto-updates section of the
+  install page.
+-->
+<gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
+  <app appid='YOUR_EXTENSION_ID_HERE'>
+    <updatecheck codebase='https://freebuff-adblock.vercel.app/downloads/freebuff-adblock-1.0.0.zip' version='1.0.0' />
+  </app>
+</gupdate>
