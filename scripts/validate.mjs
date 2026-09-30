@@ -187,7 +187,7 @@ function checkPopup() {
       : fail(`popup.html references missing file: ${ref}`);
   }
 
-  for (const id of ['toggle', 'stateText', 'count', 'installLink']) {
+  for (const id of ['toggle', 'stateText', 'count', 'statusText', 'installLink']) {
     html.includes(`id="${id}"`)
       ? pass(`popup has #${id}`)
       : fail(`popup.html is missing #${id}, which popup.js queries`);
@@ -317,6 +317,27 @@ function checkSelectors() {
       fail('AD_TOKENS contains a token that matches ordinary UI');
     else pass(`${list.length} exact ad tokens, none matching ordinary UI`);
   }
+
+  // Tier C: promo cards are matched on badge *text*, which is a far wider net
+  // than an attribute hook. The guards around it have to stay in place.
+  const labels = source.match(/const BADGE_LABELS = new Set\(\[([\s\S]*?)\]\);/);
+  if (!labels) fail('could not read BADGE_LABELS from content.js');
+  else {
+    const list = [...labels[1].matchAll(/'([^']*)'/g)].map((m) => m[1]);
+    if (!list.includes('ad') || !list.includes('sponsored'))
+      fail(`BADGE_LABELS is missing a base label: ${list.join(', ')}`);
+    else pass(`${list.length} badge labels`);
+  }
+
+  for (const needle of ['PROMO_ACTION_SELECTOR', 'REAL_CONTENT_SELECTOR']) {
+    source.includes(`const ${needle}`)
+      ? pass(`promo tier keeps its ${needle} guard`)
+      : fail(`content.js no longer defines ${needle} - promo detection would be unguarded`);
+  }
+
+  if (!source.includes('characterData: true'))
+    fail('observer does not watch characterData; a badge that appears as text is missed');
+  else pass('observer watches characterData for late badges');
 
   for (const needle of ['MutationObserver', 'chrome.storage', 'requestAnimationFrame']) {
     source.includes(needle)
