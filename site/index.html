@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Freebuff Ad Block — block ads on freebuff.com</title>
+    <meta
+      name="description"
+      content="A site-scoped Chromium extension that removes freebuff.com's ad slots, including the ones injected while a build is thinking."
+    />
+    <meta name="theme-color" content="#0b0d12" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="grid-bg" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M5.6 5.6 18.4 18.4" />
+          </svg>
+        </span>
+        <span class="brand-name">Freebuff Ad Block</span>
+      </a>
+      <span class="pill">v<span data-version>1.0.0</span></span>
+    </header>
+
+    <main>
+      <!-- ------------------------------------------------------------------ hero -->
+      <section class="hero">
+        <p class="eyebrow">Chromium · Chrome, Edge, Brave</p>
+        <h1>
+          The ads stop.<br />
+          <span class="accent">The build keeps streaming.</span>
+        </h1>
+        <p class="lede">
+          A site-scoped extension for <strong>freebuff.com</strong> only. It blocks ad requests
+          before they leave your browser, then clears out the slots that get injected while the
+          platform is thinking — the ones that appear mid-build and never fire a separate
+          request.
+        </p>
+
+        <div class="cta-row">
+          <a class="btn btn-primary" href="downloads/freebuff-adblock-1.0.0.zip" download>
+            Download extension
+            <span class="btn-meta">v<span data-version>1.0.0</span> · zip</span>
+          </a>
+          <a class="btn btn-ghost" href="#install">How to install</a>
+        </div>
+
+        <ul class="facts" role="list">
+          <li><span class="fact-k">Scope</span><span class="fact-v">freebuff.com only</span></li>
+          <li>
+            <span class="fact-k">Permissions</span>
+            <span class="fact-v">2, host access scoped to freebuff.com</span>
+          </li>
+          <li><span class="fact-k">Tracking</span><span class="fact-v">None. No network calls.</span></li>
+          <li><span class="fact-k">Size</span><span class="fact-v">Under 60&nbsp;KB</span></li>
+        </ul>
+      </section>
+
+      <!-- ------------------------------------------------------------------ how -->
+      <section class="section" id="how">
+        <div class="section-head reveal">
+          <p class="eyebrow">How it works</p>
+          <h2>Three layers, in the order they fire</h2>
+        </div>
+
+        <div class="cards">
+          <article class="card reveal">
+            <span class="step">01</span>
+            <h3>Network rules</h3>
+            <p>
+              A <code>declarativeNetRequest</code> ruleset blocks known ad and tracker hosts before
+              the request leaves the tab. Every rule is scoped to requests
+              <em>initiated by</em> freebuff.com, so it never follows you to other sites.
+            </p>
+          </article>
+
+          <article class="card reveal">
+            <span class="step">02</span>
+            <h3>Mid-build cleanup</h3>
+            <p>
+              Slots rendered client-side never make a separate ad request, so a blocklist cannot
+              see them. A content script watches the DOM and removes the ones inserted while the
+              platform is thinking, then collapses the empty space they leave behind.
+            </p>
+          </article>
+
+          <article class="card reveal">
+            <span class="step">03</span>
+            <h3>One switch</h3>
+            <p>
+              The toolbar popup pauses blocking for the whole site in one click and shows what was
+              hidden on the current tab. The setting syncs through
+              <code>chrome.storage</code> — no account, no dashboard.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------ guardrail -->
+      <section class="section">
+        <div class="callout reveal">
+          <div class="callout-body">
+            <p class="eyebrow">The part that matters</p>
+            <h2>It cannot break your build stream</h2>
+            <p>
+              Your build and thinking progress arrives over XHR and WebSocket from freebuff.com
+              itself. A single mis-scoped rule would cut that off. So the ruleset carries a
+              priority-100 <code>allow</code> rule for freebuff.com's own traffic that every block
+              rule — all priority 1 — has to lose against. Path-based rules are slash-anchored so
+              <code>/load</code> and <code>/headers</code> can never match, and the content script
+              refuses to hide any element that still holds real content.
+            </p>
+          </div>
+          <div class="callout-aside" aria-hidden="true">
+            <div class="rule">
+              <span class="rule-id">id 1</span>
+              <span class="rule-pri">priority 100</span>
+              <span class="rule-action allow">allow</span>
+              <span class="rule-dom">freebuff.com</span>
+            </div>
+            <div class="rule">
+              <span class="rule-id">id 10</span>
+              <span class="rule-pri">priority 1</span>
+              <span class="rule-action block">block</span>
+              <span class="rule-dom">doubleclick.net</span>
+            </div>
+            <div class="rule">
+              <span class="rule-id">id 12</span>
+              <span class="rule-pri">priority 1</span>
+              <span class="rule-action block">block</span>
+              <span class="rule-dom">adnxs.com</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- -------------------------------------------------------------- install -->
+      <section class="section" id="install">
+        <div class="section-head reveal">
+          <p class="eyebrow">Install</p>
+          <h2>Load it unpacked — about a minute</h2>
+          <p class="section-sub">
+            Chromium will not install an unsigned extension from a link, so the supported path is
+            loading the extracted folder as a developer extension. It behaves exactly like an
+            installed one.
+          </p>
+        </div>
+
+        <ol class="steps">
+          <li class="step-item reveal">
+            <span class="step-num">1</span>
+            <div>
+              <h3>Download and extract</h3>
+              <p>
+                Grab the zip and unpack it somewhere permanent. If you move the folder later,
+                Chrome will report the extension as unloaded and you will need to point it at the
+                new path again.
+              </p>
+              <div class="copy-row">
+                <code data-download-path>/downloads/freebuff-adblock-1.0.0.zip</code>
+                <button type="button" class="copy" data-copy>Copy</button>
+              </div>
+            </div>
+          </li>
+
+          <li class="step-item reveal">
+            <span class="step-num">2</span>
+            <div>
+              <h3>Open the extensions page</h3>
+              <p>
+                Visit <code>chrome://extensions</code> — or <code>edge://extensions</code> /
+                <code>brave://extensions</code> — and switch on <strong>Developer mode</strong> in
+                the top right corner.
+              </p>
+            </div>
+          </li>
+
+          <li class="step-item reveal">
+            <span class="step-num">3</span>
+            <div>
+              <h3>Choose Load unpacked</h3>
+              <p>
+                Press <strong>Load unpacked</strong> and select the extracted
+                <code>freebuff-adblock</code> folder — the one containing
+                <code>manifest.json</code>. The toolbar icon appears and you are done.
+              </p>
+            </div>
+          </li>
+
+          <li class="step-item reveal">
+            <span class="step-num">4</span>
+            <div>
+              <h3>Reload your open freebuff.com tabs</h3>
+              <p>
+                Content scripts only attach to pages loaded after the extension is enabled. Reload
+                any tab that was already open, then check the popup — the hidden-element counter
+                starts climbing.
+              </p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- --------------------------------------------------------------- updates -->
+      <section class="section" id="updates">
+        <div class="section-head reveal">
+          <p class="eyebrow">Auto-updates</p>
+          <h2>What the update feed does, and does not, do</h2>
+        </div>
+
+        <div class="split">
+          <div class="panel panel-warn reveal">
+            <h3>Unpacked extensions do not auto-update</h3>
+            <p>
+              This is the honest part. Chrome only checks an <code>update.xml</code> feed for
+              extensions that were <em>installed from</em> that feed. A folder you loaded unpacked
+              is treated as local source: Chrome will never poll for a newer version of it, and
+              none of the files on this site can change that.
+            </p>
+            <p>
+              To update, download the new zip, extract it, and hit the refresh button on the
+              extension card in <code>chrome://extensions</code>.
+            </p>
+          </div>
+
+          <div class="panel reveal">
+            <h3>The feed is built and ready</h3>
+            <p>
+              The build regenerates <a href="update.xml"><code>update.xml</code></a> alongside
+              every package, with the matching version and codebase URL. Wire it up when you want
+              automatic updates, by either route:
+            </p>
+            <ul role="list">
+              <li>
+                <strong>Managed policy</strong> — set <code>ExtensionInstallForcelist</code> on
+                your own machine, pointing at the feed. Chrome then installs, updates and
+                reloads it for you.
+              </li>
+              <li>
+                <strong>Chrome Web Store</strong> — publish it and the store handles distribution
+                and rollouts entirely.
+              </li>
+            </ul>
+            <p class="fine">
+              Both require the placeholder app ID in <code>update.xml</code> to be replaced with
+              the packed extension's real ID, and a signed CRX rather than a zip.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ----------------------------------------------------------------- scope -->
+      <section class="section">
+        <div class="scope-note reveal">
+          <span class="scope-label">Scope</span>
+          <p>
+            This covers the <strong>web version</strong> of freebuff.com only. The desktop
+            application is a separate binary with no extension surface, so nothing here applies
+            to it — a browser extension can only reach pages Chromium renders.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        Freebuff Ad Block · v<span data-version>1.0.0</span> · site-scoped, no accounts, no
+        telemetry.
+      </p>
+      <p class="fine">
+        Source lives in <code>extension/</code>; the package and feed are rebuilt from it on every
+        build.
+      </p>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>

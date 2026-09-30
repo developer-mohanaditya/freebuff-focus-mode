@@ -1,0 +1,96 @@
+# Freebuff Ad Block
+
+A Chromium (Manifest V3) extension that removes ads on **freebuff.com**, plus the
+static page that distributes it.
+
+Site-scoped by design: it touches freebuff.com and nothing else. No accounts, no
+backend, no database, no telemetry.
+
+## Why two layers
+
+| Layer | File | Catches |
+| --- | --- | --- |
+| Network | `extension/rules.json` | Ad requests, before they leave the tab |
+| DOM | `extension/content.js` | Slots rendered client-side mid-build |
+
+Neither alone is sufficient. A `declarativeNetRequest` ruleset only sees
+requests, so it is blind to an ad container the page builds itself while it is
+thinking. A content script only sees markup, so it never stops the request. The
+extension runs both.
+
+The ruleset carries a priority-100 `allow` for freebuff.com's own traffic that
+every block rule (all priority 1) loses against — your build and thinking stream
+can never be blocked. See `extension/rules.md` for the full reasoning.
+
+## Layout
+
+```
+extension/          the extension source
+  manifest.json       MV3 manifest
+  rules.json          declarativeNetRequest static ruleset
+  rules.md            why the rules are shaped the way they are
+  content.js          stylesheet injection + MutationObserver
+  background.js       service worker (badge counter)
+  popup.*             enable/disable popup
+  icons/              16/32/48/128, generated procedurally
+scripts/            zero-dependency build tooling
+  build.mjs           packages the zip, writes update.xml, emits dist/
+  serve.mjs           preview server (builds first, binds 0.0.0.0)
+  zip.mjs             minimal ZIP writer
+  png.mjs             minimal PNG encoder + icon artwork
+  gen-icons.mjs       force-regenerate icons
+site/               install page source
+  index.html, styles.css, app.js
+dist/               static output - served by the preview and by hosting
+```
+
+There are no npm dependencies. The production build image is Node-only and
+uploaded files lose their executable bit, so the packaging step is plain Node
+rather than a `zip` shell-out.
+
+## Commands
+
+```sh
+npm run build     # package extension -> site/downloads + site/update.xml, emit dist/
+npm start         # build, then serve dist/ on 0.0.0.0:$PORT (default 4173)
+npm run icons     # force-regenerate extension/icons
+npm run check     # syntax-check the build tooling
+```
+
+The preview server is started and managed by Freebuff
+(`freebuff-preview start`), never by hand.
+
+## Installing it
+
+Chromium will not install an unsigned extension from a link, so:
+
+1. Download and extract the zip.
+2. Open `chrome://extensions` (or `edge://extensions`, `brave://extensions`).
+3. Enable **Developer mode** → **Load unpacked** → pick the extracted
+   `freebuff-adblock` folder.
+4. Reload any freebuff.com tabs that were already open.
+
+## Auto-updates
+
+`site/update.xml` is regenerated with every build with the matching version and
+codebase URL, but **Chrome only consults an update feed for an extension
+installed from that feed** — via a managed `ExtensionInstallForcelist` policy or
+the Chrome Web Store. An extension loaded unpacked never polls it.
+
+Before the feed goes live, replace `YOUR_EXTENSION_ID_HERE` with the packed
+extension's real ID and point `codebase` at a signed CRX. The install page
+explains both routes to the user rather than implying unpacked extensions
+update themselves.
+
+## Deploying
+
+Set `SITE_ORIGIN` (in `scripts/build.mjs`, or as an environment variable) to the
+public origin so `update.xml` and the download link are absolute and correct.
+It defaults to `https://freebuff-adblock.vercel.app`.
+
+`VERCEL_TOKEN` is read from the workspace environment; nothing else is required.
+
+## Scope
+
+Web version only. The desktop application is a separate binary with no
+extension surface, so a browser extension cannot reach it.

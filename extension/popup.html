@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Freebuff Ad Block</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="head">
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M5.6 5.6 18.4 18.4" />
+        </svg>
+      </div>
+      <div class="titles">
+        <h1>Freebuff Ad Block</h1>
+        <p class="scope">freebuff.com only</p>
+      </div>
+    </header>
+
+    <section class="row">
+      <div class="labels">
+        <span class="label">Block ads</span>
+        <span class="hint" id="stateText">On</span>
+      </div>
+      <button
+        id="toggle"
+        class="switch"
+        type="button"
+        role="switch"
+        aria-checked="true"
+        aria-label="Block ads on freebuff.com"
+      >
+        <span class="knob"></span>
+      </button>
+    </section>
+
+    <section class="stats">
+      <span class="count" id="count">0</span>
+      <span class="caption">ad elements hidden on this tab</span>
+    </section>
+
+    <footer class="foot">
+      <a id="installLink" href="#" target="_blank" rel="noreferrer">Install page &amp; docs</a>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
