@@ -50,6 +50,20 @@ caught by the same attribute, without a screenshot and without a guess.
 
 That still only covers what the network marks. **`npm test` covers the rest.**
 
+### Slots that have to keep their place
+
+The strip the network drops into the preview toolbar cannot be removed the way
+the others are. It is wrapped in a full-width `flex` div that is itself one item
+of the toolbar row, so taking the wrapper out of the flow collapses that item
+and slides the controls beside it to the left.
+
+Ads shaped that way are **emptied where they stand** instead: the stylesheet
+makes the node invisible and un-clickable but leaves its box alone, so the row
+keeps its exact width, and the script skips it rather than collapsing its
+wrapper. Two conditions decide it - the ad is an item of a horizontal flex row,
+and it holds no block-level content. A card that merely happens to sit in a row
+has `div`s and `p`s in it, so it is still removed outright, wrapper included.
+
 The popup's **Hide an element on the page** button is the part no heuristic can
 replace. Click it, click an ad nothing recognised, and the rule is saved to
 `chrome.storage.sync` and reapplied on every future visit. The picker builds the
