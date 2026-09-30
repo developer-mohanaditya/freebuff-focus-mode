@@ -56,6 +56,47 @@ function readCount(tabId) {
   });
 }
 
+/* -------------------------------------------------------- user-picked rules */
+
+const PICK_TYPE = 'freebuff-adblock:pick';
+const CUSTOM_KEY = 'freebuffAdBlockSelectors';
+
+const pickButton = document.getElementById('pick');
+const customCountEl = document.getElementById('customCount');
+const clearButton = document.getElementById('clearCustom');
+
+function renderCustom(list) {
+  const count = Array.isArray(list) ? list.length : 0;
+  customCountEl.textContent =
+    count === 0 ? 'No custom rules' : `${count} custom rule${count === 1 ? '' : 's'}`;
+  clearButton.hidden = count === 0;
+}
+
+chrome.storage.sync.get({ [CUSTOM_KEY]: [] }, (value) => {
+  if (chrome.runtime.lastError) return;
+  renderCustom(value[CUSTOM_KEY]);
+});
+
+pickButton.addEventListener('click', () => {
+  if (activeTabId === undefined) {
+    renderStatus('Open freebuff.com to pick an element', 'warn');
+    return;
+  }
+
+  chrome.tabs.sendMessage(activeTabId, { type: PICK_TYPE }, () => {
+    if (chrome.runtime.lastError) {
+      renderStatus('Not running here - reload this tab', 'warn');
+      return;
+    }
+    // Get out of the way so the page is clickable.
+    window.close();
+  });
+});
+
+clearButton.addEventListener('click', () => {
+  chrome.storage.sync.set({ [CUSTOM_KEY]: [] }, () => renderCustom([]));
+});
+
 /* ------------------------------------------------------------------- status */
 
 const statusEl = document.getElementById('statusText');
@@ -109,6 +150,9 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, ENABLED_KEY)) {
     renderToggle(changes[ENABLED_KEY].newValue);
+  }
+  if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, CUSTOM_KEY)) {
+    renderCustom(changes[CUSTOM_KEY].newValue);
   }
   if (area === 'session' && Object.prototype.hasOwnProperty.call(changes, COUNTS_KEY)) {
     readCount(activeTabId);

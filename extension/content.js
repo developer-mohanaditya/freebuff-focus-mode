@@ -15,8 +15,9 @@
  *   - Never fight the build stream: no network activity, no XHR, no fetch.
  *
  * Detection is deliberately three-tiered:
- *   Tier A - explicit hooks (`[data-ad-slot]`, an iframe on an ad host). Safe
- *            to hide outright; the markup says what it is.
+ *   Tier A - explicit hooks (`[data-ad-slot]`, an iframe on an ad host, a
+ *            `data-gravity-ad` slot, a `rel="sponsored"` link). Safe to hide
+ *            outright; the markup says what it is.
  *   Tier B - attribute *token* matching (`class="ad-slot"` -> tokens
  *            ["ad","slot"]). Tokenised rather than substring matching, because
  *            `[class*="ad"]` also matches header/add/read/load/deadline and
@@ -36,6 +37,15 @@
   const HIDDEN_CLASS = 'fbad-hidden';
   const ENABLED_KEY = 'freebuffAdBlockEnabled';
   const PING_TYPE = 'freebuff-adblock:ping';
+  const PICK_TYPE = 'freebuff-adblock:pick';
+  const CUSTOM_KEY = 'freebuffAdBlockSelectors';
+  const CUSTOM_STYLE_ID = 'freebuff-adblock-custom';
+  const PICK_BAR_ID = 'freebuff-adblock-picker';
+  const PICK_BAR_STYLE =
+    'position:fixed;z-index:2147483647;top:12px;left:50%;transform:translateX(-50%);' +
+    'background:#0d1017;color:#e9edf5;font:12px/1.4 ui-sans-serif,system-ui,sans-serif;' +
+    'padding:8px 14px;border-radius:999px;border:1px solid rgba(255,90,69,.5);' +
+    'box-shadow:0 8px 24px rgba(0,0,0,.45);pointer-events:none;';
 
   // Ad and tracker hosts a free-tier slot is likely to load from.
   const AD_HOSTS = [
@@ -76,6 +86,21 @@
     '[data-ad-container]',
     '[data-ad-client]',
     '[data-google-query-id]',
+    // Ad-network hooks. These are the strongest signals in the file: a
+    // first-party data attribute written by the ad server itself, the standard
+    // sponsored-link rel value, and the ad network's own click endpoint. The
+    // in the preview toolbar carries all three and - unlike the promo cards -
+    // carries no text label at all, so nothing text-based could have found it.
+    // The click path is matched generically, not by host, and the remaining
+    // attribute variants are covered by hasNetworkAttribute below - CSS cannot
+    // match an attribute *name* prefix, so only the likely spellings are listed
+    // here and the rest are caught in script.
+    '[data-gravity-ad]',
+    '[data-gravity-ad-slot]',
+    '[data-gravity-ad-unit]',
+    '[data-gravity-sponsored]',
+    'a[rel~="sponsored"]',
+    'a[href*="/track/click"]',
     '[data-testid*="ad-slot"]',
     '[data-testid*="ad-banner"]',
     '[data-testid*="ad-container"]',
@@ -197,9 +222,21 @@
       `object[data*="${h}"], source[src*="${h}"], video[src*="${h}"]`
   ).join(', ');
 
-  const TIER_A_SELECTOR = AD_SELECTORS.concat(
+  const TIER_A_ENTRIES = AD_SELECTORS.concat(
     AD_HOSTS.map((h) => `iframe[src*="${h}"], img[src*="${h}"]`)
-  ).join(', ');
+  );
+
+  // The stylesheet takes the whole list at once - CSS has no practical length
+  // cap. Matching is done in small groups instead, because one enormous
+  // selector is a fragile thing: an engine that refuses it rejects every hook
+  // in the list at once, silently, which is exactly how the toolbar strip kept
+  // its place after the hooks for it already existed.
+  const TIER_A_GROUPS = [];
+  for (let i = 0; i < TIER_A_ENTRIES.length; i += 5) {
+    TIER_A_GROUPS.push(TIER_A_ENTRIES.slice(i, i + 5).join(', '));
+  }
+
+  const TIER_A_SELECTOR = TIER_A_ENTRIES.join(', ');
 
   const CANDIDATE_SELECTOR = TOKEN_SOURCE_ATTRS.map((a) => `[${a}]`).join(', ');
 
@@ -214,6 +251,13 @@
     '}',
   ].join('\n');
 
+  // User-picked selectors, kept separate from everything inferred on our own.
+  // These are rules a person made deliberately, so they are applied last and
+  // they survive a re-render, a rescue, and anything else in this file.
+  const PICK_ATTRS = ['data-gravity-ad', 'data-ad', 'data-ad-slot', 'data-ad-unit', 'data-testid'];
+
+  let customSelectors = [];
+  let customStyleEl = null;
   let styleEl = null;
   let enabled = true;
   let observer = null;
@@ -242,6 +286,7 @@
     const wasEnabled = enabled;
     enabled = !!next;
     if (styleEl) styleEl.disabled = !enabled;
+    if (customStyleEl) customStyleEl.disabled = !enabled;
     if (enabled && !wasEnabled && document.body) {
       rescueHidden(document.body);
       sweep(document.body);
@@ -303,6 +348,46 @@
     if (hasAdMedia(el)) return false; // ad-host media inside: it is an ad
     if (hasAnyMedia(el)) return true; // media, but from somewhere legitimate
     return textLength(el) > MAX_HEURISTIC_TEXT;
+  }
+
+  /* ------------------------------------------------------- user-picked rules */
+
+  function injectCustomStyle() {
+    customStyleEl = document.getElementById(CUSTOM_STYLE_ID);
+    if (!customStyleEl) {
+      customStyleEl = document.createElement('style');
+      customStyleEl.id = CUSTOM_STYLE_ID;
+      (document.head || document.documentElement).appendChild(customStyleEl);
+    }
+
+    customStyleEl.textContent = customSelectors
+      .map((selector) => `${selector} { display: none !important; visibility: hidden !important; }`)
+      .join(' ');
+    customStyleEl.disabled = !enabled;
+  }
+
+  function matchesCustom(el) {
+    for (const selector of customSelectors) {
+      try {
+        if (el.matches(selector)) return true;
+      } catch {
+        // A rule that no longer parses simply stops matching; the rest carry on.
+      }
+    }
+    return false;
+  }
+
+  /** Applied last in every pass, so nothing else can undo a deliberate rule. */
+  function applyCustom(root) {
+    for (const selector of customSelectors) {
+      let found;
+      try {
+        found = root.querySelectorAll(selector);
+      } catch {
+        continue;
+      }
+      for (const el of found) hide(el);
+    }
   }
 
   /* ------------------------------------------------------------ promo cards */
@@ -408,17 +493,41 @@
    * still leaves tier B and the promo tier running.
    */
   function matchesTierA(el) {
-    try {
-      return el.matches(TIER_A_SELECTOR);
-    } catch {
-      return false;
+    for (const group of TIER_A_GROUPS) {
+      try {
+        if (el.matches(group)) return true;
+      } catch {
+        // A group the engine refuses must not take the others down with it.
+      }
     }
+    return false;
+  }
+
+  /**
+   * Attribute *names* an ad network tends to use. A stylesheet cannot match a
+   * name prefix, so these are checked in script: a slot marked with
+   * `data-gravity-ad-anything` in future is caught without touching the
+   * selector list. Every prefix stays ad-specific, so an unrelated
+   * `data-gravity-*` attribute on real UI cannot match one.
+   */
+  const NETWORK_ATTR_PREFIXES = ['data-gravity-ad', 'data-gravity-sponsored', 'data-gravity-promo'];
+
+  function hasNetworkAttribute(el) {
+    for (const attr of el.attributes) {
+      const name = attr.name;
+      if (!name.startsWith('data-')) continue;
+      for (const prefix of NETWORK_ATTR_PREFIXES) {
+        if (name.startsWith(prefix)) return true;
+      }
+    }
+    return false;
   }
 
   /** Returns 'a', 'b' or null. */
   function classify(el) {
     if (isNeverHidden(el)) return null;
     if (matchesTierA(el)) return 'a';
+    if (hasNetworkAttribute(el)) return 'a';
     if (hasAdToken(el) && !hasRealContent(el)) return 'b';
     return null;
   }
@@ -517,6 +626,8 @@
     const parent = el.parentElement;
     if (!parent || !parent.classList.contains(HIDDEN_CLASS)) return;
     if (isStillAd(parent)) return;
+    // A rule someone made by hand is never second-guessed.
+    if (matchesCustom(parent)) return;
     unhideFrom(parent);
   }
 
@@ -541,13 +652,15 @@
 
     process(root, classify(root));
 
-    let tierA;
-    try {
-      tierA = root.querySelectorAll(TIER_A_SELECTOR);
-    } catch {
-      tierA = [];
+    for (const group of TIER_A_GROUPS) {
+      let found;
+      try {
+        found = root.querySelectorAll(group);
+      } catch {
+        continue;
+      }
+      for (const el of found) process(el, 'a');
     }
-    for (const el of tierA) process(el, 'a');
 
     let candidates;
     try {
@@ -561,6 +674,7 @@
     }
 
     scanBadges(root);
+    applyCustom(root);
   }
 
   /** Full pass: reset counter, scan, report. */
@@ -693,13 +807,27 @@
 
   function readState() {
     try {
-      chrome.storage.sync.get({ [ENABLED_KEY]: true }, (value) => {
+      chrome.storage.sync.get({ [ENABLED_KEY]: true, [CUSTOM_KEY]: [] }, (value) => {
         if (chrome.runtime.lastError) return;
+        const saved = value[CUSTOM_KEY];
+        customSelectors = Array.isArray(saved) ? saved : [];
+        injectCustomStyle();
         setEnabled(value[ENABLED_KEY]);
       });
 
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area !== 'sync') return;
+
+        if (Object.prototype.hasOwnProperty.call(changes, CUSTOM_KEY)) {
+          const saved = changes[CUSTOM_KEY].newValue;
+          customSelectors = Array.isArray(saved) ? saved : [];
+          injectCustomStyle();
+          if (enabled && document.body) {
+            rescueHidden(document.body);
+            sweep(document.body);
+          }
+        }
+
         if (!Object.prototype.hasOwnProperty.call(changes, ENABLED_KEY)) return;
         setEnabled(changes[ENABLED_KEY].newValue);
       });
@@ -714,6 +842,7 @@
     if (document.getElementById(STYLE_ID)) return;
 
     injectStyle();
+    injectCustomStyle();
     readState();
 
     observer = new MutationObserver((records) => {
@@ -756,6 +885,149 @@
     else document.addEventListener('DOMContentLoaded', startObserving, { once: true });
   }
 
+  /* ----------------------------------------------------------------- picking */
+
+  /**
+   * The escape hatch, and the only part of this file that cannot be caught out
+   * by markup it has never seen. An unrecognised ad is one click away from
+   * becoming a rule that holds on every future visit.
+   */
+  let picking = false;
+  let pickBar = null;
+  let pickHovered = null;
+  let pickHoveredOutline = '';
+
+  function isDigit(ch) {
+    return ch >= '0' && ch <= '9';
+  }
+
+  /**
+   * Build the most durable selector we can for an element: a real attribute
+   * first, an id second, then any data-* attribute, and only then a structural
+   * path - which is the fragile one, so it is the last resort.
+   */
+  function describeElement(el) {
+    const tag = el.tagName.toLowerCase();
+
+    for (const attr of PICK_ATTRS) {
+      if (el.hasAttribute(attr)) return `${tag}[${attr}]`;
+    }
+
+    const id = el.getAttribute('id');
+    if (id && !id.includes(':') && !isDigit(id.charAt(0))) return `#${id}`;
+
+    for (const attr of el.attributes) {
+      const name = attr.name;
+      if (!name.startsWith('data-')) continue;
+      if (name === 'data-state' || name === 'data-slot') continue;
+      if (attr.value.length > 40) continue;
+      return `${tag}[${name}]`;
+    }
+
+    const path = [];
+    let node = el;
+    let depth = 0;
+
+    while (node && node !== document.body && depth < 6) {
+      let part = node.tagName.toLowerCase();
+      const parent = node.parentElement;
+      if (parent) {
+        const siblings = Array.from(parent.children).filter((sib) => sib.tagName === node.tagName);
+        if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
+      }
+      path.unshift(part);
+      node = parent;
+      depth++;
+    }
+
+    return path.join(' > ');
+  }
+
+  function highlight(el) {
+    if (pickHovered === el) return;
+    if (pickHovered) pickHovered.style.outline = pickHoveredOutline;
+    pickHovered = el;
+    if (el) {
+      pickHoveredOutline = el.style.outline;
+      el.style.outline = '2px solid #ff5a45';
+    }
+  }
+
+  function pickTarget(event) {
+    const el = event.target;
+    if (!el || el.nodeType !== Node.ELEMENT_NODE) return null;
+    if (el.id === PICK_BAR_ID) return null;
+    return el;
+  }
+
+  function onPickMove(event) {
+    const el = pickTarget(event);
+    if (el) highlight(el);
+  }
+
+  function onPickClick(event) {
+    const el = pickTarget(event);
+    if (!el) return;
+
+    // The click belongs to us while picking, not to the page.
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (isNeverHidden(el) || el === document.body) {
+      if (pickBar) pickBar.textContent = 'That is part of the page frame - pick something smaller.';
+      return;
+    }
+
+    rememberSelector(describeElement(el));
+    hide(el);
+    stopPicking();
+  }
+
+  function onPickKey(event) {
+    if (event.key === 'Escape') stopPicking();
+  }
+
+  function rememberSelector(selector) {
+    if (!selector) return;
+    if (customSelectors.includes(selector)) return;
+
+    customSelectors = customSelectors.concat(selector);
+    try {
+      chrome.storage.sync.set({ [CUSTOM_KEY]: customSelectors });
+    } catch {
+      // Storage unavailable: the rule still holds for this page.
+    }
+    injectCustomStyle();
+  }
+
+  function startPicking() {
+    if (picking) return;
+    picking = true;
+
+    pickBar = document.createElement('div');
+    pickBar.id = PICK_BAR_ID;
+    pickBar.textContent = 'Click the ad to hide it - Esc to cancel';
+    pickBar.setAttribute('style', PICK_BAR_STYLE);
+    (document.body || document.documentElement).appendChild(pickBar);
+
+    document.addEventListener('mousemove', onPickMove, true);
+    document.addEventListener('click', onPickClick, true);
+    document.addEventListener('keydown', onPickKey, true);
+  }
+
+  function stopPicking() {
+    if (!picking) return;
+    picking = false;
+
+    document.removeEventListener('mousemove', onPickMove, true);
+    document.removeEventListener('click', onPickClick, true);
+    document.removeEventListener('keydown', onPickKey, true);
+
+    highlight(null);
+    if (pickBar && pickBar.parentElement) pickBar.parentElement.removeChild(pickBar);
+    pickBar = null;
+  }
+
   /* ------------------------------------------------------------------- ping */
 
   /**
@@ -765,11 +1037,20 @@
    * before the extension was enabled.
    */
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (!message || message.type !== PING_TYPE) return;
+    if (!message) return;
+
+    if (message.type === PICK_TYPE) {
+      startPicking();
+      sendResponse({ ok: true, picking: true });
+      return;
+    }
+
+    if (message.type !== PING_TYPE) return;
     sendResponse({
       ok: true,
       enabled,
       hidden: hiddenTotal,
+      custom: customSelectors.length,
       version: chrome.runtime.getManifest().version,
     });
   });

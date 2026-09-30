@@ -13,6 +13,8 @@ backend, no database, no telemetry.
 | Network | `extension/rules.json` | Ad requests, before they leave the tab |
 | DOM hooks | `extension/content.js` | Ad-shaped markup injected mid-build |
 | In-product promos | `extension/content.js` | freebuff.com's own "AD" cards |
+| Ad-network slots | `extension/content.js` + `rules.json` | `data-gravity-ad` slots, `rel="sponsored"` links |
+| Picked by hand | `popup` + `extension/content.js` | Anything you hide yourself, on every visit |
 
 None of them alone is sufficient. A `declarativeNetRequest` ruleset only sees
 requests, so it is blind to an ad container the page builds itself while it is
@@ -30,6 +32,33 @@ below it.
 The ruleset carries a priority-100 `allow` for freebuff.com's own traffic that
 every block rule (all priority 1) loses against — your build and thinking stream
 can never be blocked. See `extension/rules.md` for the full reasoning.
+
+## The ad network, and what happens when it changes
+
+The in-product slots are not hand-built by freebuff.com. They arrive from an ad
+network, and the slots it injects carry three markers worth knowing:
+
+| Marker | Meaning |
+| --- | --- |
+| `data-gravity-ad` (and `data-gravity-ad-*`) | the network's own slot attribute |
+| `rel="… sponsored"` | the standard sponsored-link rel value |
+| `href="…/track/click?…"` | the network's click endpoint |
+
+Matching on the network's markers rather than on freebuff.com's layout is what
+makes this hold in places we have never seen: a new slot anywhere in the app is
+caught by the same attribute, without a screenshot and without a guess.
+
+That still only covers what the network marks. **`npm test` covers the rest.**
+
+The popup's **Hide an element on the page** button is the part no heuristic can
+replace. Click it, click an ad nothing recognised, and the rule is saved to
+`chrome.storage.sync` and reapplied on every future visit. The picker builds the
+most durable selector it can — a real attribute first, then an id, then any
+`data-*` attribute, and a structural path only as a last resort, because
+structural paths break the moment a layout changes.
+
+Deliberate rules are applied last in every pass and are never second-guessed by
+`rescue()`, so a rule you made by hand outranks anything inferred.
 
 ## Layout
 

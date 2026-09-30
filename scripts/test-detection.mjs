@@ -48,6 +48,7 @@ git commit -m "Add Freebuff Ad Block"</code></pre>
         <article class="msg" id="linkmsg">
           <p>Docs live at <a href="https://example.com/docs">example.com</a></p>
         </article>
+        <div class="preseed" id="preseed">Saved rule target</div>
       </div>
       <div class="composer" id="composer">
         <div class="promo banner" id="banner">
@@ -70,19 +71,31 @@ const dom = new JSDOM(html, {
 const { window } = dom;
 const { document } = window;
 
-// Minimal chrome.* surface: the script only reads state, watches for changes and
-// reports counts.
+// Minimal chrome.* surface. State lives in this object so a saved rule can be
+// seeded before the script runs, and so the tests can read back whatever the
+// picker stored. Message listeners are captured so the picker can be triggered.
+const store = { freebuffAdBlockEnabled: true, freebuffAdBlockSelectors: ['.preseed'] };
+const messageListeners = [];
+
+const sendMessage = (type) => messageListeners.forEach((fn) => fn({ type }, {}, () => {}));
+
 window.chrome = {
   runtime: {
     lastError: null,
-    getManifest: () => ({ version: '1.1.0' }),
+    getManifest: () => ({ version: '1.2.0' }),
     sendMessage: () => undefined,
-    onMessage: { addListener() {} },
+    onMessage: { addListener: (fn) => messageListeners.push(fn) },
   },
   storage: {
     sync: {
-      get: (defaults, cb) => cb(defaults),
-      set() {},
+      get: (defaults, cb) => {
+        const out = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+          if (key in store) out[key] = store[key];
+        }
+        cb(out);
+      },
+      set: (values) => Object.assign(store, values),
     },
     session: { get: (defaults, cb) => cb(defaults), set() {} },
     onChanged: { addListener() {} },
@@ -184,6 +197,110 @@ check('promo strip with no anchor is hidden', hidden('strip'), true);
 check('toolbar row that holds it stays visible', hidden('bar'), false);
 check('address field stays visible', hidden('addr'), false);
 check('stop button stays visible', hidden('stop'), false);
+
+// The real markup, copied from the live page: an ad-network slot inside the
+// preview toolbar. Worth noting what it does NOT contain - no "AD" chip and no
+// ad-shaped class. Its only honest signals are the data attribute, the
+// sponsored rel and the tracking href.
+console.log('\nreal ad-network slot (copied from the live page)');
+const gravityBar = document.createElement('div');
+gravityBar.id = 'gravity-bar';
+gravityBar.innerHTML =
+  '<input id="gravity-addr" value="https://freebuff.com/">' +
+  '<a id="gravity-ad" href="https://api.trygravity.ai/track/click?p=abc123" target="_blank" rel="noopener noreferrer sponsored" data-gravity-ad="true" class="group flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 no-underline" data-state="closed">' +
+  '<img alt="" loading="lazy" class="h-4 w-4 shrink-0 rounded-sm object-contain" src="https://icons.duckduckgo.com/ip3/www.baseten.co.ico">' +
+  '<span class="shrink-0 text-[11px] font-semibold">Baseten</span>' +
+  '<span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px]">Deploy mission-critical AI inference on dedicated deployments with Baseten 99.99% uptime and SOC 2</span>' +
+  '</a>' +
+  '<button id="gravity-stop">stop</button>';
+document.querySelector('.thread').appendChild(gravityBar);
+await new Promise((r) => setTimeout(r, 60));
+check('ad-network slot is hidden', hidden('gravity-ad'), true);
+check('row holding the slot stays visible', hidden('gravity-bar'), false);
+check('address field beside the slot stays visible', hidden('gravity-addr'), false);
+check('stop button beside the slot stays visible', hidden('gravity-stop'), false);
+
+// Each hook has to stand on its own, because the network does not always ship
+// all three on every placement.
+const relOnly = document.createElement('a');
+relOnly.id = 'rel-only';
+relOnly.setAttribute('rel', 'noopener sponsored');
+relOnly.setAttribute('href', 'https://example.com/partner');
+relOnly.textContent = 'A sponsored placement';
+document.querySelector('.thread').appendChild(relOnly);
+
+const hrefOnly = document.createElement('a');
+hrefOnly.id = 'href-only';
+hrefOnly.setAttribute('href', 'https://api.trygravity.ai/track/click?p=xyz');
+hrefOnly.textContent = 'Baseten: deploy inference';
+document.querySelector('.thread').appendChild(hrefOnly);
+
+const dataOnly = document.createElement('div');
+dataOnly.id = 'data-only';
+dataOnly.setAttribute('data-gravity-ad', 'true');
+dataOnly.textContent = 'Promoted slot with no link at all';
+document.querySelector('.thread').appendChild(dataOnly);
+
+await new Promise((r) => setTimeout(r, 60));
+check('rel=sponsored alone is enough', hidden('rel-only'), true);
+check('tracking href alone is enough', hidden('href-only'), true);
+check('data-gravity-ad alone is enough', hidden('data-only'), true);
+check('messages around them stay visible', hidden('assistant'), false);
+
+// A saved rule has to be honoured on load, and has to survive the card rebuild
+// that used to tear hides down.
+console.log('\nsaved rules and unseen slot names');
+check('saved rule is applied on load', hidden('preseed'), true);
+
+const intoSaved = document.createElement('p');
+intoSaved.textContent = 'Content rendered into an element a rule hid';
+document.getElementById('preseed').appendChild(intoSaved);
+await new Promise((r) => setTimeout(r, 40));
+check('a rule-hidden element stays hidden when content lands in it', hidden('preseed'), true);
+
+// A slot name the network has not used yet. Not in the selector list, caught by
+// the attribute-name scan instead.
+const variant = document.createElement('div');
+variant.id = 'gravity-variant';
+variant.setAttribute('data-gravity-ad-banner', 'left-rail');
+variant.textContent = 'A slot name we had never seen';
+document.querySelector('.thread').appendChild(variant);
+await new Promise((r) => setTimeout(r, 40));
+check('unseen data-gravity-ad-* slot name is caught', hidden('gravity-variant'), true);
+
+// The escape hatch: an ad shape nothing recognises, hidden by hand.
+console.log('\npicker');
+// Named deliberately free of any ad-ish token: nothing here should be caught by
+// a hook, a token or a badge, which is the whole point of the picker.
+const mystery = document.createElement('div');
+mystery.id = 'mystery-unit';
+mystery.className = 'promo-teaser';
+mystery.textContent = 'A format from a network we have never seen';
+document.querySelector('.thread').appendChild(mystery);
+await new Promise((r) => setTimeout(r, 40));
+check('unrecognised element is visible before picking', hidden('mystery-unit'), false);
+
+sendMessage('freebuff-adblock:pick');
+check('picker bar appears', !!document.getElementById('freebuff-adblock-picker'), true);
+
+mystery.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+await new Promise((r) => setTimeout(r, 40));
+check('picked element is hidden', hidden('mystery-unit'), true);
+check('the rule was saved', store.freebuffAdBlockSelectors.includes('#mystery-unit'), true);
+check('picker bar is gone after picking', !!document.getElementById('freebuff-adblock-picker'), false);
+
+// Esc has to back out cleanly, leaving the page exactly as it was.
+sendMessage('freebuff-adblock:pick');
+const other = document.createElement('div');
+other.id = 'other-unit';
+other.textContent = 'Another unrecognised unit';
+document.querySelector('.thread').appendChild(other);
+document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+other.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+await new Promise((r) => setTimeout(r, 40));
+check('Esc cancels without hiding anything', hidden('other-unit'), false);
+check('picker bar is gone after Esc', !!document.getElementById('freebuff-adblock-picker'), false);
+check('messages still visible after picking', hidden('assistant'), false);
 
 const failed = results.filter((r) => !r).length;
 console.log('');

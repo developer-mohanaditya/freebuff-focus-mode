@@ -187,7 +187,16 @@ function checkPopup() {
       : fail(`popup.html references missing file: ${ref}`);
   }
 
-  for (const id of ['toggle', 'stateText', 'count', 'statusText', 'installLink']) {
+  for (const id of [
+    'toggle',
+    'stateText',
+    'count',
+    'statusText',
+    'installLink',
+    'pick',
+    'customCount',
+    'clearCustom',
+  ]) {
     html.includes(`id="${id}"`)
       ? pass(`popup has #${id}`)
       : fail(`popup.html is missing #${id}, which popup.js queries`);
@@ -288,7 +297,20 @@ function checkSelectors() {
   const grab = (name) => {
     const match = source.match(new RegExp(`const ${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`));
     if (!match) return null;
-    return [...match[1].matchAll(/'([^']*)'/g)].map((m) => m[1]);
+
+    // Strip line comments before pairing quotes. Prose inside the array can
+    // contain an apostrophe, and one stray quote shifts every pair after it -
+    // the check then reports selectors that are not there and misses ones that
+    // are, which is worse than not checking at all.
+    const body = match[1]
+      .split('\n')
+      .map((line) => {
+        const at = line.indexOf('//');
+        return at < 0 ? line : line.slice(0, at);
+      })
+      .join('\n');
+
+    return [...body.matchAll(/'([^']*)'/g)].map((m) => m[1]);
   };
 
   const selectors = grab('AD_SELECTORS');
@@ -308,6 +330,14 @@ function checkSelectors() {
   dangerous.length
     ? fail(`blank-page selector present: ${dangerous.join(', ')} (matches header/add/read/load)`)
     : pass('no bare [class*="ad"] selector (would match header/add/read/load)');
+
+  // The ad network's own hooks. These carry the in-product slots, which ship no
+  // text label to match on, so losing one silently re-opens the toolbar strip.
+  for (const hook of ['[data-gravity-ad]', 'a[rel~="sponsored"]']) {
+    (selectors || []).includes(hook)
+      ? pass(`ad-network hook present: ${hook}`)
+      : fail(`AD_SELECTORS no longer covers ${hook} - in-product ad slots would slip through`);
+  }
 
   const tokens = source.match(/const AD_TOKENS = new Set\(\[([\s\S]*?)\]\);/);
   if (!tokens) fail('could not read AD_TOKENS from content.js');
@@ -399,6 +429,44 @@ function checkOrigin() {
     );
 }
 
+/* ------------------------------------------------------------ picker wiring */
+
+/**
+ * The popup asks the content script to start picking by message type. Two files
+ * hold that string, and if they ever disagree the button silently does nothing -
+ * no error anywhere, just a dead control.
+ */
+function checkPickerWiring() {
+  console.log('\npicker wiring');
+
+  const declaration = (file, name) => {
+    const source = fs.readFileSync(file, 'utf8');
+    const line = source.split('\n').find((text) => text.includes(`const ${name} =`));
+    if (!line) return null;
+    const open = line.indexOf("'");
+    const close = line.lastIndexOf("'");
+    return open >= 0 && close > open ? line.slice(open + 1, close) : null;
+  };
+
+  const fromContent = declaration(path.join(EXT, 'content.js'), 'PICK_TYPE');
+  const fromPopup = declaration(path.join(EXT, 'popup.js'), 'PICK_TYPE');
+
+  if (!fromContent || !fromPopup) {
+    fail('could not read PICK_TYPE from both content.js and popup.js');
+  } else if (fromContent !== fromPopup) {
+    fail(`PICK_TYPE disagrees: content.js "${fromContent}" vs popup.js "${fromPopup}"`);
+  } else {
+    pass(`picker message type agrees: ${fromContent}`);
+  }
+
+  const content = fs.readFileSync(path.join(EXT, 'content.js'), 'utf8');
+  for (const needle of ['startPicking', 'describeElement', 'CUSTOM_KEY']) {
+    content.includes(needle)
+      ? pass(`content.js keeps ${needle}`)
+      : fail(`content.js no longer defines ${needle} - hand-picked rules would break`);
+  }
+}
+
 /* ------------------------------------------------------------------ package */
 
 function run() {
@@ -410,6 +478,7 @@ function run() {
   checkRules();
   checkSelectors();
   checkOrigin();
+  checkPickerWiring();
 
   console.log('');
   if (problems.length) {

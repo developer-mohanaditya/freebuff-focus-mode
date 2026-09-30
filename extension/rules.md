@@ -14,6 +14,7 @@ explanations live here instead.
 | `11` | 1 | `block` | Amazon ad system. |
 | `12` | 1 | `block` | Programmatic + RTB exchanges. |
 | `13` | 1 | `block` | Native / content-recommendation units. |
+| `14` | 1 | `block` | Ad-network tracking on `trygravity.ai/track/`. |
 | `15` | 1 | `block` | `/ads/` path segment. |
 | `16` | 1 | `block` | `/adserver` path segment. |
 | `17` | 1 | `block` | `/advert` path segment. |
@@ -51,6 +52,29 @@ rule 1 covers first-party hits anyway.
 Earlier drafts of this file used `_comment` keys for grouping notes. Chrome's
 DNR schema rejects unknown properties, which fails the whole ruleset. Keep
 comments in this file only.
+
+## The in-product ad network
+
+freebuff.com serves its own in-product promos through an ad network whose
+click endpoint is `api.trygravity.ai/track/click`, and the slots it injects are
+marked three ways:
+
+| Hook | Where it is |
+| --- | --- |
+| `data-gravity-ad="true"` | the slot element itself |
+| `rel="noopener noreferrer sponsored"` | the wrapping anchor |
+| `href="https://api.trygravity.ai/track/click?p=…"` | the wrapping anchor |
+
+Those three are handled by `content.js` as tier A hooks, because a slot this
+explicit does not need guessing. Rule 14 covers the tracking half of the same
+network: the host is scoped by `/track/` rather than blocked outright, because
+`trygravity.ai` also serves non-ad API traffic.
+
+**Rule 14 deliberately does not list `main_frame`.** Clicking an ad is a
+top-level navigation, and blocking a top-level navigation is how you break a
+page - the browser shows an error instead of the destination. There is nothing
+to click once `content.js` has removed the element, so the network rule only
+needs to cover beacons.
 
 ## Adding a domain
 
