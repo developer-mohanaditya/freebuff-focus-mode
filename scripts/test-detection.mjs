@@ -82,7 +82,7 @@ const sendMessage = (type) => messageListeners.forEach((fn) => fn({ type }, {}, 
 window.chrome = {
   runtime: {
     lastError: null,
-    getManifest: () => ({ version: '1.2.2' }),
+    getManifest: () => ({ version: '1.3.0' }),
     sendMessage: () => undefined,
     onMessage: { addListener: (fn) => messageListeners.push(fn) },
   },

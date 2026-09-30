@@ -57,7 +57,7 @@ function formatBytes(bytes) {
 
 /* ------------------------------------------------------------- package the zip */
 
-function packageExtension(version) {
+function packageAll(version) {
   fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
 
   const files = walk(EXT_DIR).sort();
@@ -65,37 +65,45 @@ function packageExtension(version) {
     throw new Error('extension/manifest.json not found - nothing to package');
   }
 
-  // The manifest must sit at the root of the archive Chrome extracts, and a
-  // single top-level folder keeps the extracted result tidy.
-  const entries = files.map((relative) => {
-    const absolute = path.join(EXT_DIR, relative);
+  const pack = (root, suffix) => {
+    const entries = files.map((relative) => {
+      const name = relative.split(path.sep).join('/');
+      return {
+        // A single top-level folder keeps a hand-extracted result tidy. Store
+        // submissions are the other way round: the Chrome Web Store, Edge
+        // Add-ons and AMO all want manifest.json at the root of the archive.
+        name: root ? `${root}/${name}` : name,
+        data: fs.readFileSync(path.join(EXT_DIR, relative)),
+      };
+    });
+
+    const zip = createZip(entries);
+    const fileName = `freebuff-adblock-${version}${suffix}.zip`;
+    fs.writeFileSync(path.join(DOWNLOADS_DIR, fileName), zip);
+
     return {
-      name: `${ZIP_ROOT_FOLDER}/${relative.split(path.sep).join('/')}`,
-      data: fs.readFileSync(absolute),
+      fileName,
+      relativePath: `downloads/${fileName}`,
+      absoluteUrl: `${SITE_ORIGIN}/downloads/${fileName}`,
+      bytes: zip.length,
+      fileCount: entries.length,
     };
-  });
+  };
 
-  const zip = createZip(entries);
-  const fileName = `freebuff-adblock-${version}.zip`;
-  const outPath = path.join(DOWNLOADS_DIR, fileName);
+  const unpacked = pack(ZIP_ROOT_FOLDER, '');
+  const store = pack(null, '-store');
 
-  // Remove stale packages so downloads/ never accumulates old versions.
+  // Remove stale packages so downloads/ never accumulates old versions. Both
+  // current variants are kept - neither is a leftover of the other.
+  const keep = new Set([unpacked.fileName, store.fileName]);
   for (const existing of fs.readdirSync(DOWNLOADS_DIR)) {
-    if (existing.endsWith('.zip') && existing !== fileName) {
+    if (existing.endsWith('.zip') && !keep.has(existing)) {
       fs.unlinkSync(path.join(DOWNLOADS_DIR, existing));
       log('removed stale package', existing);
     }
   }
 
-  fs.writeFileSync(outPath, zip);
-
-  return {
-    fileName,
-    relativePath: `downloads/${fileName}`,
-    absoluteUrl: `${SITE_ORIGIN}/downloads/${fileName}`,
-    bytes: zip.length,
-    fileCount: entries.length,
-  };
+  return { unpacked, store };
 }
 
 /* ---------------------------------------------------------------- update feed */
@@ -135,7 +143,7 @@ function writeUpdateXml(version, packageInfo) {
  * Substitutions are regexes over already-substituted values, so rebuilding
  * never drifts: run it twice and the output is identical.
  */
-function writeDist(version, packageInfo) {
+function writeDist(version, packageInfo, storeInfo) {
   fs.rmSync(DIST_DIR, { recursive: true, force: true });
   fs.mkdirSync(DIST_DIR, { recursive: true });
 
@@ -170,7 +178,16 @@ function writeDist(version, packageInfo) {
 
   fs.writeFileSync(
     path.join(DIST_DIR, 'version.json'),
-    `${JSON.stringify({ version, zip: packageInfo.relativePath, origin: SITE_ORIGIN }, null, 2)}\n`
+    `${JSON.stringify(
+      {
+        version,
+        zip: packageInfo.relativePath,
+        store: storeInfo ? storeInfo.relativePath : null,
+        origin: SITE_ORIGIN,
+      },
+      null,
+      2
+    )}\n`
   );
 }
 
@@ -185,16 +202,17 @@ export function build() {
   const manifest = readManifest();
   const version = manifest.version;
 
-  const packageInfo = packageExtension(version);
-  writeUpdateXml(version, packageInfo);
-  writeDist(version, packageInfo);
+  const { unpacked, store } = packageAll(version);
+  writeUpdateXml(version, unpacked);
+  writeDist(version, unpacked, store);
 
-  log(`v${version} - ${packageInfo.fileCount} files, ${formatBytes(packageInfo.bytes)}`);
-  log(`package  site/${packageInfo.relativePath}`);
+  log(`v${version} - ${unpacked.fileCount} files, ${formatBytes(unpacked.bytes)}`);
+  log(`package  site/${unpacked.relativePath}   (load unpacked)`);
+  log(`package  site/${store.relativePath}   (store submission)`);
   log('feed     site/update.xml');
   log(`output   dist/  (${Date.now() - started}ms)`);
 
-  return { version, packageInfo };
+  return { version, unpacked, store };
 }
 
 const invokedDirectly =
