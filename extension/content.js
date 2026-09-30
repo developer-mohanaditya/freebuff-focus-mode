@@ -14,7 +14,7 @@
  *   - Never hide a subtree that carries real content (see hasRealContent).
  *   - Never fight the build stream: no network activity, no XHR, no fetch.
  *
- * Detection is deliberately two-tiered:
+ * Detection is deliberately three-tiered:
  *   Tier A - explicit hooks (`[data-ad-slot]`, an iframe on an ad host). Safe
  *            to hide outright; the markup says what it is.
  *   Tier B - attribute *token* matching (`class="ad-slot"` -> tokens
@@ -23,6 +23,11 @@
  *            would blank the page. Tier B additionally requires the subtree to
  *            be small, so a section that merely has "ad" in its class name and
  *            holds real content is left alone.
+ *   Tier C - in-product promo cards. freebuff.com advertises to itself: a card
+ *            with a literal "AD" chip, a headline, body copy and a call to
+ *            action, injected straight into the thread. Nothing third-party
+ *            loads, and nothing in the markup says "ad", so the badge text is
+ *            the only hook there is.
  */
 (() => {
   'use strict';
@@ -30,6 +35,7 @@
   const STYLE_ID = 'freebuff-adblock-style';
   const HIDDEN_CLASS = 'fbad-hidden';
   const ENABLED_KEY = 'freebuffAdBlockEnabled';
+  const PING_TYPE = 'freebuff-adblock:ping';
 
   // Ad and tracker hosts a free-tier slot is likely to load from.
   const AD_HOSTS = [
@@ -154,6 +160,35 @@
   // in its class name from disappearing.
   const MAX_HEURISTIC_TEXT = 300;
 
+  // Tier C - freebuff.com's own in-product promo cards.
+  //
+  // These are rendered by freebuff.com itself, so no network rule can reach
+  // them, and they carry no ad-shaped class or id - the literal "AD" chip is
+  // the only reliable hook, which means this tier reads text where A and B read
+  // attributes. Two guards keep that from eating real content:
+  //   - the badge must be a leaf element whose entire text is a label like "AD";
+  //   - the wrapper found above it must hold a link or a button, must stay
+  //     under MAX_PROMO_TEXT characters, and must contain no code or editor.
+  const BADGE_LABELS = new Set([
+    'ad',
+    'ads',
+    'advert',
+    'advertisement',
+    'sponsored',
+    'promoted',
+  ]);
+
+  const BADGE_LEAF_SELECTOR = 'span, b, strong, em, i, small, sup, mark, abbr, p, div, a';
+  const MAX_BADGE_LENGTH = 24;
+  const MAX_BADGE_CHILDREN = 2;
+  const PROMO_MIN_TEXT = 12;
+  const MAX_PROMO_TEXT = 600;
+  const MAX_PROMO_DEPTH = 8;
+  const MAX_PROMO_ACTIONS = 2;
+  const PROMO_ACTION_SELECTOR = 'a[href], button, [role="button"], input[type="submit"]';
+  const REAL_CONTENT_SELECTOR =
+    'pre, code, textarea, input, [contenteditable="true"], video, audio';
+
   const ANY_MEDIA_SELECTOR = 'iframe, embed, object, ins, video, audio, source, img';
 
   const AD_MEDIA_SELECTOR = AD_HOSTS.map(
@@ -183,8 +218,10 @@
   let enabled = true;
   let observer = null;
   const pending = new Set();
+  const pendingBadges = new Set();
   let scheduled = false;
   let hiddenThisFlush = 0;
+  let hiddenTotal = 0;
 
   /* ------------------------------------------------------------------ setup */
 
@@ -232,12 +269,22 @@
     return (el.textContent || '').replace(/\s+/g, ' ').trim().length;
   }
 
+  // Both of these can be handed a very long generated selector, so they fail
+  // closed ("no media found") rather than throwing out of the pass.
   function hasAdMedia(el) {
-    return !!el.querySelector(AD_MEDIA_SELECTOR);
+    try {
+      return !!el.querySelector(AD_MEDIA_SELECTOR);
+    } catch {
+      return false;
+    }
   }
 
   function hasAnyMedia(el) {
-    return !!el.querySelector(ANY_MEDIA_SELECTOR);
+    try {
+      return !!el.querySelector(ANY_MEDIA_SELECTOR);
+    } catch {
+      return false;
+    }
   }
 
   function isNeverHidden(el) {
@@ -258,12 +305,115 @@
     return textLength(el) > MAX_HEURISTIC_TEXT;
   }
 
+  /* ------------------------------------------------------------ promo cards */
+
+  /**
+   * True when el's whole text is an ad label.
+   *
+   * Decided on text rather than on being a leaf, because the chip may hold an
+   * icon, and some builds put the label in the same element as the sponsor name
+   * ("Baseten AD"). Anything holding more than a label's worth of text is
+   * rejected, and the child-count check up front keeps the textContent reads
+   * off the bulk of the tree.
+   */
+  function isBadge(el) {
+    if (el.children.length > MAX_BADGE_CHILDREN) return false;
+    const raw = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!raw || raw.length > MAX_BADGE_LENGTH) return false;
+
+    const whole = raw.replace(/[^a-z]/gi, '').toLowerCase();
+    if (whole !== '' && BADGE_LABELS.has(whole)) return true;
+
+    if (!raw.includes(' ')) return false;
+    const last = raw.split(' ').pop().replace(/[^a-z]/gi, '').toLowerCase();
+    return BADGE_LABELS.has(last);
+  }
+
+  /**
+   * True when node is plausibly the card a badge labels: short enough to be a
+   * promo unit, with a call to action, and without the code or input fields a
+   * real message or the composer would contain.
+   */
+  function isPromoCard(node) {
+    if (isNeverHidden(node)) return false;
+
+    let actions;
+    try {
+      if (node.querySelector(REAL_CONTENT_SELECTOR)) return false;
+      actions = node.querySelectorAll(PROMO_ACTION_SELECTOR).length;
+    } catch {
+      return false;
+    }
+
+    // One call to action, two at most. A wrapper that swallowed the card along
+    // with the skill chips or the message buttons underneath it would be well
+    // past that - and that is precisely the climb this has to refuse, because
+    // it would take working UI with it.
+    if (actions < 1 || actions > MAX_PROMO_ACTIONS) return false;
+
+    const length = textLength(node);
+    return length >= PROMO_MIN_TEXT && length <= MAX_PROMO_TEXT;
+  }
+
+  /**
+   * Climb from a badge to the outermost wrapper that is still only the card.
+   * Stops as soon as an ancestor stops looking like one, so the climb cannot
+   * escape into the message list or the composer.
+   */
+  function findPromoCard(badge) {
+    let card = null;
+    let node = badge.parentElement;
+    let depth = 0;
+
+    while (node && node !== document.body && depth < MAX_PROMO_DEPTH) {
+      if (isNeverHidden(node)) break;
+      if (isPromoCard(node)) card = node;
+      else if (card) break;
+      node = node.parentElement;
+      depth++;
+    }
+
+    return card;
+  }
+
+  function hideBadgeCard(el) {
+    if (el.nodeType !== Node.ELEMENT_NODE || !isBadge(el)) return;
+    const card = findPromoCard(el);
+    if (!card) return;
+    if (hide(card)) collapseUp(card);
+  }
+
+  /** Hide every promo card labelled by a badge inside root. */
+  function scanBadges(root) {
+    hideBadgeCard(root);
+
+    let leaves;
+    try {
+      leaves = root.querySelectorAll(BADGE_LEAF_SELECTOR);
+    } catch {
+      return;
+    }
+
+    for (const el of leaves) hideBadgeCard(el);
+  }
+
   /* -------------------------------------------------------------- classify */
 
   /** Returns 'a', 'b' or null. */
   function classify(el) {
     if (isNeverHidden(el)) return null;
-    if (el.matches(TIER_A_SELECTOR)) return 'a';
+
+    // A selector that throws - engine limits, a malformed attribute, anything -
+    // must never abort the pass that hides the ads. This file failing open on
+    // tier A still leaves tier B and the promo tier running.
+    let tierA = false;
+    try {
+      tierA = el.matches(TIER_A_SELECTOR);
+    } catch {
+      tierA = false;
+    }
+    if (tierA) return 'a';
+
     if (hasAdToken(el) && !hasRealContent(el)) return 'b';
     return null;
   }
@@ -272,6 +422,7 @@
     if (el.classList.contains(HIDDEN_CLASS)) return false;
     el.classList.add(HIDDEN_CLASS);
     hiddenThisFlush++;
+    hiddenTotal++;
     return true;
   }
 
@@ -373,6 +524,8 @@
       const tier = classify(el);
       if (tier === 'b') process(el, 'b');
     }
+
+    scanBadges(root);
   }
 
   /** Full pass: reset counter, scan, report. */
@@ -404,10 +557,33 @@
 
   function schedule(nodes) {
     for (const node of nodes) {
+      // Setting textContent - what React does when it fills in a label after
+      // mount - arrives here as a *new text node*, not as a characterData
+      // mutation. Dropping those is how a badge gets missed entirely.
+      if (node.nodeType === Node.TEXT_NODE) {
+        scheduleBadge(node);
+        continue;
+      }
       if (node.nodeType !== Node.ELEMENT_NODE) continue;
       if (node.id === STYLE_ID) continue;
       pending.add(node);
     }
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(flush);
+  }
+
+  /**
+   * A badge often shows up as a text change inside markup that was already on
+   * the page, which is why the observer listens for characterData too. Those
+   * records are checked directly instead of triggering a subtree scan: the page
+   * streams text constantly while it builds, and rescanning on every character
+   * would be a lot of work for nothing.
+   */
+  function scheduleBadge(node) {
+    const el = node && node.parentElement;
+    if (!el) return;
+    pendingBadges.add(el);
     if (scheduled) return;
     scheduled = true;
     requestAnimationFrame(flush);
@@ -418,6 +594,7 @@
 
     if (!enabled) {
       pending.clear();
+      pendingBadges.clear();
       return;
     }
 
@@ -431,6 +608,18 @@
         scan(el);
       } catch {
         // A malformed subtree must never break the page.
+      }
+    }
+
+    const badges = Array.from(pendingBadges);
+    pendingBadges.clear();
+
+    for (const el of badges) {
+      if (!el.isConnected) continue;
+      try {
+        hideBadgeCard(el);
+      } catch {
+        // Same rule: never let one bad node break the page.
       }
     }
 
@@ -482,6 +671,10 @@
     observer = new MutationObserver((records) => {
       const nodes = [];
       for (const record of records) {
+        if (record.type === 'characterData') {
+          scheduleBadge(record.target);
+          continue;
+        }
         for (const node of record.addedNodes) nodes.push(node);
       }
       if (nodes.length) schedule(nodes);
@@ -489,7 +682,11 @@
 
     const startObserving = () => {
       if (!document.body) return;
-      observer.observe(document.body, { childList: true, subtree: true });
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
       rescueHidden(document.body);
       sweep(document.body);
     };
@@ -497,6 +694,24 @@
     if (document.body) startObserving();
     else document.addEventListener('DOMContentLoaded', startObserving, { once: true });
   }
+
+  /* ------------------------------------------------------------------- ping */
+
+  /**
+   * The popup asks a tab whether this script is actually running. Without it,
+   * "nothing was found" and "nothing is running" look identical from the
+   * outside - which is exactly the confusing case when a tab was already open
+   * before the extension was enabled.
+   */
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (!message || message.type !== PING_TYPE) return;
+    sendResponse({
+      ok: true,
+      enabled,
+      hidden: hiddenTotal,
+      version: chrome.runtime.getManifest().version,
+    });
+  });
 
   init();
 })();

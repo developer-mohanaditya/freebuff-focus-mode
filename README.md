@@ -6,17 +6,26 @@ static page that distributes it.
 Site-scoped by design: it touches freebuff.com and nothing else. No accounts, no
 backend, no database, no telemetry.
 
-## Why two layers
+## Why three layers
 
 | Layer | File | Catches |
 | --- | --- | --- |
 | Network | `extension/rules.json` | Ad requests, before they leave the tab |
-| DOM | `extension/content.js` | Slots rendered client-side mid-build |
+| DOM hooks | `extension/content.js` | Ad-shaped markup injected mid-build |
+| In-product promos | `extension/content.js` | freebuff.com's own "AD" cards |
 
-Neither alone is sufficient. A `declarativeNetRequest` ruleset only sees
+None of them alone is sufficient. A `declarativeNetRequest` ruleset only sees
 requests, so it is blind to an ad container the page builds itself while it is
-thinking. A content script only sees markup, so it never stops the request. The
-extension runs both.
+thinking. A content script only sees markup, so it never stops the request. And
+an in-product promo card is first-party with no ad-shaped class or id at all, so
+it can only be found by its badge text. The extension runs all three.
+
+The promo tier is the one place matching is not based on an attribute, so it is
+fenced in tightly: a leaf whose entire text is a label like `AD`, a card found
+above it that holds a link or button, stays under 600 characters, contains no
+code block or editor, and carries a single call to action. That last guard is
+what stops the walk from climbing out of the card and taking the skill chips
+below it.
 
 The ruleset carries a priority-100 `allow` for freebuff.com's own traffic that
 every block rule (all priority 1) loses against — your build and thinking stream
@@ -31,11 +40,13 @@ extension/          the extension source
   rules.md            why the rules are shaped the way they are
   content.js          stylesheet injection + MutationObserver
   background.js       service worker (badge counter)
-  popup.*             enable/disable popup
+  popup.*             enable/disable popup + "is it running on this tab?"
   icons/              16/32/48/128, generated procedurally
 scripts/            zero-dependency build tooling
   build.mjs           packages the zip, writes update.xml, emits dist/
   serve.mjs           preview server (builds first, binds 0.0.0.0)
+  validate.mjs        static checks Chrome would otherwise only fail at load
+  test-detection.mjs  jsdom checks: hides the ads, keeps the chat
   zip.mjs             minimal ZIP writer
   png.mjs             minimal PNG encoder + icon artwork
   gen-icons.mjs       force-regenerate icons
@@ -55,6 +66,8 @@ npm run build     # package extension -> site/downloads + site/update.xml, emit 
 npm start         # build, then serve dist/ on 0.0.0.0:$PORT (default 4173)
 npm run icons     # force-regenerate extension/icons
 npm run check     # syntax-check the build tooling
+npm run validate  # static extension checks (manifest, icons, DNR rules, selectors)
+npm test          # jsdom checks for the content script (needs `npm i --no-save jsdom`)
 ```
 
 The preview server is started and managed by Freebuff

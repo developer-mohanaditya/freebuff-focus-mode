@@ -56,11 +56,52 @@ function readCount(tabId) {
   });
 }
 
+/* ------------------------------------------------------------------- status */
+
+const statusEl = document.getElementById('statusText');
+const PING_TYPE = 'freebuff-adblock:ping';
+const SITE_URL = /^https?:\/\/([a-z0-9-]+\.)*freebuff\.com(\/|$)/i;
+
+function renderStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = kind ? `status ${kind}` : 'status';
+}
+
+/**
+ * Ask the content script in this tab whether it is alive. A missing reply is
+ * the one failure you cannot otherwise see: the extension is installed, but the
+ * page was loaded before it, so nothing was ever scanned.
+ */
+function checkTab(tab) {
+  if (!tab || tab.id === undefined) {
+    renderStatus('Open freebuff.com to start blocking', 'warn');
+    return;
+  }
+
+  if (!SITE_URL.test(tab.url || '')) {
+    renderStatus('Not a freebuff.com tab — nothing to do here', 'warn');
+    return;
+  }
+
+  chrome.tabs.sendMessage(tab.id, { type: PING_TYPE }, (response) => {
+    if (chrome.runtime.lastError || !response || !response.ok) {
+      renderStatus('Not running here — reload this tab', 'warn');
+      return;
+    }
+    renderStatus(
+      response.enabled ? `Active on this tab (v${response.version})` : 'Paused on this tab',
+      response.enabled ? 'live' : 'warn'
+    );
+  });
+}
+
 let activeTabId;
 
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-  activeTabId = tabs[0] && tabs[0].id;
+  const tab = tabs[0];
+  activeTabId = tab && tab.id;
   readCount(activeTabId);
+  checkTab(tab);
 });
 
 /* ------------------------------------------------------- live updates while open */

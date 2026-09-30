@@ -25,7 +25,7 @@
         </span>
         <span class="brand-name">Freebuff Ad Block</span>
       </a>
-      <span class="pill">v<span data-version>1.0.0</span></span>
+      <span class="pill">v<span data-version>1.1.0</span></span>
     </header>
 
     <main>
@@ -44,9 +44,9 @@
         </p>
 
         <div class="cta-row">
-          <a class="btn btn-primary" href="downloads/freebuff-adblock-1.0.0.zip" download>
+          <a class="btn btn-primary" href="downloads/freebuff-adblock-1.1.0.zip" download>
             Download extension
-            <span class="btn-meta">v<span data-version>1.0.0</span> · zip</span>
+            <span class="btn-meta">v<span data-version>1.1.0</span> · zip</span>
           </a>
           <a class="btn btn-ghost" href="#install">How to install</a>
         </div>
@@ -87,6 +87,13 @@
               Slots rendered client-side never make a separate ad request, so a blocklist cannot
               see them. A content script watches the DOM and removes the ones inserted while the
               platform is thinking, then collapses the empty space they leave behind.
+            </p>
+            <p>
+              The same layer covers freebuff.com's own in-product promo cards — the ones with a
+              literal <em>AD</em> chip next to CodeRabbit or Baseten. Those are first-party, so only
+              reading the page can remove them. They are matched on the badge text and never on
+              page text alone, and nothing holding a link-free paragraph, a code block or an editor
+              is ever touched.
             </p>
           </article>
 
@@ -163,7 +170,7 @@
                 new path again.
               </p>
               <div class="copy-row">
-                <code data-download-path>/downloads/freebuff-adblock-1.0.0.zip</code>
+                <code data-download-path>/downloads/freebuff-adblock-1.1.0.zip</code>
                 <button type="button" class="copy" data-copy>Copy</button>
               </div>
             </div>
@@ -270,7 +277,7 @@
 
     <footer class="footer">
       <p>
-        Freebuff Ad Block · v<span data-version>1.0.0</span> · site-scoped, no accounts, no
+        Freebuff Ad Block · v<span data-version>1.1.0</span> · site-scoped, no accounts, no
         telemetry.
       </p>
       <p class="fine">
