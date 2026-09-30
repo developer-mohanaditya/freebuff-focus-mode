@@ -346,6 +346,59 @@ function checkSelectors() {
   }
 }
 
+/* ------------------------------------------------------------------- origin */
+
+/**
+ * The popup's install link and the feed's codebase URL come from two different
+ * files. When they disagree, the popup links to a domain that does not exist and
+ * the feed advertises a package nobody can fetch - and nothing anywhere reports
+ * an error, because both files are individually well-formed. So compare them.
+ */
+/**
+ * The first single-quoted string after `needle`, or null.
+ *
+ * Deliberately not a regex. The obvious greedy pattern backtracks to the last
+ * quote on the line and then lets its capture group run on across newlines, so
+ * it silently compares two pieces of unrelated text and reports a mismatch that
+ * does not exist. This cannot do that.
+ */
+function quotedAfter(source, needle) {
+  const at = source.indexOf(needle);
+  if (at < 0) return null;
+  const open = source.indexOf("'", at);
+  if (open < 0) return null;
+  const close = source.indexOf("'", open + 1);
+  if (close < 0) return null;
+  return source.slice(open + 1, close);
+}
+
+function checkOrigin() {
+  console.log('\nsite origin');
+
+  const build = fs.readFileSync(path.join(ROOT, 'scripts', 'build.mjs'), 'utf8');
+  const popup = fs.readFileSync(path.join(EXT, 'popup.js'), 'utf8');
+
+  const origin = quotedAfter(build, 'const SITE_ORIGIN'); // dead: old regex tail -> \n]*'([^']+)'/);
+  if (!origin || !origin.startsWith('http')) {
+    fail('could not read SITE_ORIGIN from scripts/build.mjs');
+    return;
+  }
+  pass(`build origin: ${origin}`);
+
+  const install = quotedAfter(popup, 'const INSTALL_URL'); // dead: old regex tail -> \n]*'([^']+)'/);
+  if (!install || !install.startsWith('http')) {
+    fail('could not read INSTALL_URL from extension/popup.js');
+    return;
+  }
+
+  const expected = origin.endsWith('/') ? origin : `${origin}/`;
+  if (install === expected) pass(`popup install link matches: ${install}`);
+  else
+    fail(
+      `popup INSTALL_URL ${install} does not match SITE_ORIGIN ${origin} - the popup would link off-site`
+    );
+}
+
 /* ------------------------------------------------------------------ package */
 
 function run() {
@@ -356,6 +409,7 @@ function run() {
   checkPopup();
   checkRules();
   checkSelectors();
+  checkOrigin();
 
   console.log('');
   if (problems.length) {

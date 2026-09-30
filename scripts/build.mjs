@@ -28,7 +28,7 @@ const DOWNLOADS_DIR = path.join(SITE_DIR, 'downloads');
  * Must match INSTALL_URL in extension/popup.js.
  * Override with SITE_ORIGIN when the project is deployed elsewhere.
  */
-const SITE_ORIGIN = process.env.SITE_ORIGIN || 'https://freebuff-adblock.vercel.app';
+const SITE_ORIGIN = process.env.SITE_ORIGIN || 'https://freebuff-adblocker.vercel.app';
 
 const ZIP_ROOT_FOLDER = 'freebuff-adblock';
 
