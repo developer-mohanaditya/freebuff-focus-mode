@@ -10,7 +10,7 @@ const ENABLED_KEY = 'freebuffAdBlockEnabled';
 const COUNTS_KEY = 'hiddenCounts';
 
 // Kept in sync with SITE_ORIGIN in scripts/build.mjs.
-const INSTALL_URL = 'https://freebuff-adblock.vercel.app/';
+const INSTALL_URL = 'https://freebuff-adblocker.vercel.app/';
 
 const toggle = document.getElementById('toggle');
 const stateText = document.getElementById('stateText');

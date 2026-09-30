@@ -99,7 +99,11 @@ update themselves.
 
 Set `SITE_ORIGIN` (in `scripts/build.mjs`, or as an environment variable) to the
 public origin so `update.xml` and the download link are absolute and correct.
-It defaults to `https://freebuff-adblock.vercel.app`.
+It defaults to `https://freebuff-adblocker.vercel.app`.
+
+`extension/popup.js` (`INSTALL_URL`) points at the same origin; `npm run
+validate` fails if the two drift apart, because a mismatch is a dead link in the
+popup and a dead `codebase` in the feed rather than anything visible here.
 
 `VERCEL_TOKEN` is read from the workspace environment; nothing else is required.
 
