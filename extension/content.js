@@ -345,11 +345,14 @@
       return false;
     }
 
-    // One call to action, two at most. A wrapper that swallowed the card along
-    // with the skill chips or the message buttons underneath it would be well
-    // past that - and that is precisely the climb this has to refuse, because
-    // it would take working UI with it.
-    if (actions < 1 || actions > MAX_PROMO_ACTIONS) return false;
+    // Two calls to action at most - and none is allowed too. Several of these
+    // promos are plain divs with a framework click handler rather than an
+    // anchor, so demanding a link misses them, which is how the strip inside the
+    // preview toolbar kept its place. The cap is the guard that matters: a
+    // wrapper that swallowed the card along with the skill chips or the message
+    // buttons under it is well past it, and taking working UI with it is
+    // exactly the climb this has to refuse.
+    if (actions > MAX_PROMO_ACTIONS) return false;
 
     const length = textLength(node);
     return length >= PROMO_MIN_TEXT && length <= MAX_PROMO_TEXT;
@@ -399,30 +402,34 @@
 
   /* -------------------------------------------------------------- classify */
 
+  /**
+   * Tier A match, never throwing: a selector engine limit or a malformed
+   * attribute must not abort the pass that hides the ads. Failing open here
+   * still leaves tier B and the promo tier running.
+   */
+  function matchesTierA(el) {
+    try {
+      return el.matches(TIER_A_SELECTOR);
+    } catch {
+      return false;
+    }
+  }
+
   /** Returns 'a', 'b' or null. */
   function classify(el) {
     if (isNeverHidden(el)) return null;
-
-    // A selector that throws - engine limits, a malformed attribute, anything -
-    // must never abort the pass that hides the ads. This file failing open on
-    // tier A still leaves tier B and the promo tier running.
-    let tierA = false;
-    try {
-      tierA = el.matches(TIER_A_SELECTOR);
-    } catch {
-      tierA = false;
-    }
-    if (tierA) return 'a';
-
+    if (matchesTierA(el)) return 'a';
     if (hasAdToken(el) && !hasRealContent(el)) return 'b';
     return null;
   }
 
-  function hide(el) {
+  function hide(el, counted = true) {
     if (el.classList.contains(HIDDEN_CLASS)) return false;
     el.classList.add(HIDDEN_CLASS);
-    hiddenThisFlush++;
-    hiddenTotal++;
+    if (counted) {
+      hiddenThisFlush++;
+      hiddenTotal++;
+    }
     return true;
   }
 
@@ -477,12 +484,40 @@
   }
 
   /**
-   * Real content streamed into a wrapper we already hid means we guessed
-   * wrong - put it and its hidden ancestors back so nothing disappears.
+   * True when an element we already hid still looks like an ad: it matches a
+   * tier A hook, or it still carries an ad badge.
+   */
+  function isStillAd(el) {
+    if (matchesTierA(el)) return true;
+
+    let leaves;
+    try {
+      leaves = el.querySelectorAll(BADGE_LEAF_SELECTOR);
+    } catch {
+      return false;
+    }
+
+    for (const node of leaves) {
+      if (isBadge(node)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Real content streamed into a wrapper we already hid means we guessed wrong -
+   * put it and its hidden ancestors back so nothing disappears.
+   *
+   * The exception is the whole reason a promo card used to reappear the moment
+   * you sent another prompt: these cards rebuild their own contents on every
+   * render, and treating that rebuild as a false positive tore the hide straight
+   * back down. A hide only comes off when the element has stopped looking like
+   * an ad.
    */
   function rescue(el) {
     const parent = el.parentElement;
-    if (parent && parent.classList.contains(HIDDEN_CLASS)) unhideFrom(parent);
+    if (!parent || !parent.classList.contains(HIDDEN_CLASS)) return;
+    if (isStillAd(parent)) return;
+    unhideFrom(parent);
   }
 
   /* ------------------------------------------------------------------ sweep */
@@ -580,6 +615,14 @@
    * streams text constantly while it builds, and rescanning on every character
    * would be a lot of work for nothing.
    */
+  /** True when a class rewrite took our hidden class off an element. */
+  function lostHiddenClass(record) {
+    const target = record.target;
+    if (!target || target.nodeType !== Node.ELEMENT_NODE) return false;
+    if (target.classList.contains(HIDDEN_CLASS)) return false;
+    return typeof record.oldValue === 'string' && record.oldValue.includes(HIDDEN_CLASS);
+  }
+
   function scheduleBadge(node) {
     const el = node && node.parentElement;
     if (!el) return;
@@ -597,6 +640,11 @@
       pendingBadges.clear();
       return;
     }
+
+    // The stylesheet is the only thing that actually hides anything. If the page
+    // rebuilt its head, every hide already made is silently inert, so check it
+    // here instead of trusting that it survived.
+    if (!styleEl || !styleEl.isConnected) injectStyle();
 
     hiddenThisFlush = 0;
     const batch = Array.from(pending);
@@ -675,6 +723,16 @@
           scheduleBadge(record.target);
           continue;
         }
+
+        // A framework re-render that rewrites className takes our hidden class
+        // with it, and the ad is back without a single node being inserted. Put
+        // the class straight back rather than rescanning - the old value proves
+        // this element was one we hid, and re-adding it fires no further change.
+        if (record.type === 'attributes') {
+          if (lostHiddenClass(record)) hide(record.target, false);
+          continue;
+        }
+
         for (const node of record.addedNodes) nodes.push(node);
       }
       if (nodes.length) schedule(nodes);
@@ -686,6 +744,9 @@
         childList: true,
         subtree: true,
         characterData: true,
+        attributes: true,
+        attributeFilter: ['class'],
+        attributeOldValue: true,
       });
       rescueHidden(document.body);
       sweep(document.body);

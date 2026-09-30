@@ -140,6 +140,51 @@ check('card whose badge text arrived later (characterData path)', hidden('textla
 check('assistant message still visible', hidden('assistant'), false);
 check('skills chip row still visible', hidden('skills'), false);
 
+// Sending another prompt makes these cards rebuild their contents in place.
+// That must not lift the hide.
+console.log('\nre-render resilience');
+const refreshed = document.createElement('p');
+refreshed.textContent = 'A fresh impression, rebuilt in place.';
+document.getElementById('card').appendChild(refreshed);
+await new Promise((r) => setTimeout(r, 60));
+check('card that rebuilt its own contents stays hidden', hidden('card'), true);
+check('card is still display-blocked by the stylesheet', !!document.getElementById('freebuff-adblock-style'), true);
+
+// A framework re-render can rewrite className, taking the hidden class with it.
+document.getElementById('card').classList.remove(HIDDEN);
+await new Promise((r) => setTimeout(r, 60));
+check('card stripped of the hidden class is re-hidden', hidden('card'), true);
+
+// If the page replaces its head, the stylesheet doing the hiding is gone and
+// every hide already made is inert.
+document.getElementById('freebuff-adblock-style').remove();
+const poke = document.createElement('div');
+poke.textContent = 'poke';
+document.querySelector('.thread').appendChild(poke);
+await new Promise((r) => setTimeout(r, 60));
+check('stylesheet is re-injected after being removed', !!document.getElementById('freebuff-adblock-style'), true);
+
+// The strip in the preview toolbar: a badge with no anchor, sharing a row with
+// the address field and the navigation buttons.
+console.log('\npromo strip sharing a toolbar row');
+const bar = document.createElement('div');
+bar.className = 'preview-toolbar';
+bar.id = 'bar';
+bar.innerHTML =
+  '<button>back</button><button>forward</button><button>reload</button>' +
+  '<input id="addr" value="https://example.com/">' +
+  '<div class="promo strip" id="strip">' +
+  '<span class="logo"></span><span class="brand">Baseten</span><span class="ad-chip">AD</span>' +
+  '<span class="copy">Deploy mission-critical AI inference on dedicated deployments with Baseten.</span>' +
+  '</div>' +
+  '<button id="stop">stop</button>';
+document.querySelector('.thread').appendChild(bar);
+await new Promise((r) => setTimeout(r, 60));
+check('promo strip with no anchor is hidden', hidden('strip'), true);
+check('toolbar row that holds it stays visible', hidden('bar'), false);
+check('address field stays visible', hidden('addr'), false);
+check('stop button stays visible', hidden('stop'), false);
+
 const failed = results.filter((r) => !r).length;
 console.log('');
 if (failed) {
