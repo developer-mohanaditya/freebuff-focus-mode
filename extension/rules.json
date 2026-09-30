@@ -129,6 +129,30 @@
   },
 
   {
+    "id": 14,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "initiatorDomains": ["freebuff.com"],
+      "requestDomains": ["trygravity.ai"],
+      "urlFilter": "/track/",
+      "resourceTypes": [
+        "sub_frame",
+        "stylesheet",
+        "script",
+        "image",
+        "font",
+        "object",
+        "xmlhttprequest",
+        "ping",
+        "media",
+        "websocket",
+        "other"
+      ]
+    }
+  },
+
+  {
     "id": 15,
     "priority": 1,
     "action": { "type": "block" },
