@@ -1,7 +1,7 @@
 # Freebuff Ad Block
 
-A Chromium (Manifest V3) extension that removes ads on **freebuff.com**, plus the
-static page that distributes it.
+A Chromium and Firefox (Manifest V3) extension that removes ads on
+**freebuff.com**, plus the static page that distributes it.
 
 Site-scoped by design: it touches freebuff.com and nothing else. No accounts, no
 backend, no database, no telemetry.
@@ -32,6 +32,30 @@ below it.
 The ruleset carries a priority-100 `allow` for freebuff.com's own traffic that
 every block rule (all priority 1) loses against — your build and thinking stream
 can never be blocked. See `extension/rules.md` for the full reasoning.
+
+## Browsers
+
+One manifest, three stores. Firefox has no Manifest V3 service worker, so
+`background` declares **both** keys — the worker Chromium runs and the event page
+Firefox falls back to. That is Mozilla's documented cross-browser pattern, and
+Chrome 121+ ignores `scripts` rather than refusing to load the extension.
+`browser_specific_settings.gecko.id` is required to sign an MV3 add-on on AMO;
+Chromium ignores the key. `strict_min_version` is 115, where `storage.session`
+became available.
+
+Everything else is shared: the same `declarativeNetRequest` ruleset, the same
+content script, the same popup. `npm run validate` fails when either background
+key is missing, so a browser cannot be dropped by accident.
+
+One build writes two packages:
+
+| File | For |
+| --- | --- |
+| `freebuff-adblock-<version>.zip` | load unpacked — one tidy top-level folder |
+| `freebuff-adblock-<version>-store.zip` | store upload — `manifest.json` at the archive root |
+
+All three stores (Chrome Web Store, Edge Add-ons, addons.mozilla.org) want the
+second one.
 
 ## The ad network, and what happens when it changes
 
@@ -86,7 +110,7 @@ extension/          the extension source
   popup.*             enable/disable popup + "is it running on this tab?"
   icons/              16/32/48/128, generated procedurally
 scripts/            zero-dependency build tooling
-  build.mjs           packages the zip, writes update.xml, emits dist/
+  build.mjs           packages both zips, writes update.xml, emits dist/
   serve.mjs           preview server (builds first, binds 0.0.0.0)
   validate.mjs        static checks Chrome would otherwise only fail at load
   test-detection.mjs  jsdom checks: hides the ads, keeps the chat
@@ -94,7 +118,9 @@ scripts/            zero-dependency build tooling
   png.mjs             minimal PNG encoder + icon artwork
   gen-icons.mjs       force-regenerate icons
 site/               install page source
-  index.html, styles.css, app.js
+  index.html          markup; the version is stamped in at build time
+  styles.css
+  app.js              store-button detection; paste listing URLs into STORE_LINKS
 dist/               static output - served by the preview and by hosting
 ```
 
@@ -105,7 +131,7 @@ rather than a `zip` shell-out.
 ## Commands
 
 ```sh
-npm run build     # package extension -> site/downloads + site/update.xml, emit dist/
+npm run build     # package both zips -> site/downloads, write site/update.xml, emit dist/
 npm start         # build, then serve dist/ on 0.0.0.0:$PORT (default 4173)
 npm run icons     # force-regenerate extension/icons
 npm run check     # syntax-check the build tooling
@@ -125,6 +151,25 @@ Chromium will not install an unsigned extension from a link, so:
 3. Enable **Developer mode** → **Load unpacked** → pick the extracted
    `freebuff-adblock` folder.
 4. Reload any freebuff.com tabs that were already open.
+
+## The install page's store button
+
+The hero button is filled in at runtime, not hard-coded. `site/app.js` asks the
+browser to name itself first (`userAgentData.brands`), which every Blink browser
+answers — so a fork nobody has heard of still gets its own label — and falls back
+to user-agent matching for Firefox and Safari, which implement no such API.
+Either way the button ends up reading *Add to Chrome*, *Add to Coc Coc*, *Add to
+Firefox* for the reader in front of it, pointing at the store that serves them.
+Paste listing URLs into `STORE_LINKS`; any store left empty simply gets no button,
+so the page can never offer a dead link.
+
+Every Chromium browser installs from the Chrome Web Store, so an unrecognised
+browser falls through to that rather than to nothing: a wrong guess costs a
+label, never an install. Safari is the one deliberate dead end — it needs a
+native wrapper and a paid Apple account, so it is detected and given no button
+rather than one that leads nowhere. `npm run validate` fails if a browser in the
+table points at a store that has no link, or if Safari's matcher stops being the
+narrow one.
 
 ## Auto-updates
 

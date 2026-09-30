@@ -109,9 +109,41 @@ function checkManifest() {
     ? pass(`host access scoped: ${hosts.join(', ')}`)
     : fail(`host_permissions not scoped to freebuff.com: ${hosts.join(', ')}`);
 
+  // Cross-browser background. Firefox has no MV3 service worker and runs an
+  // event page instead, so the documented pattern is to declare both keys:
+  // browsers with service workers use that one, the rest fall back to scripts.
+  // Chrome 121+ ignores `scripts` rather than refusing to load the extension.
+  const worker = manifest.background?.service_worker;
+  const scripts = manifest.background?.scripts;
+
+  worker
+    ? pass(`background service worker: ${worker}`)
+    : fail('background.service_worker is missing - Chrome would run no background');
+
+  if (Array.isArray(scripts) && scripts.length) {
+    pass(`background scripts (Firefox event page): ${scripts.join(', ')}`);
+  } else {
+    fail('background.scripts is missing - Firefox would run no background at all');
+  }
+
+  if (worker && Array.isArray(scripts) && scripts.includes(worker)) {
+    pass('both background keys run the same file');
+  } else {
+    fail('background.scripts must include background.service_worker');
+  }
+
+  const gecko = manifest.browser_specific_settings?.gecko;
+  gecko?.id
+    ? pass(`gecko id ${gecko.id}`)
+    : fail('browser_specific_settings.gecko.id is required to sign an MV3 add-on for Firefox');
+  gecko?.strict_min_version
+    ? pass(`gecko strict_min_version ${gecko.strict_min_version}`)
+    : fail('browser_specific_settings.gecko.strict_min_version is not set');
+
   // Every file the manifest points at must exist.
   const referenced = [];
-  if (manifest.background?.service_worker) referenced.push(manifest.background.service_worker);
+  if (worker) referenced.push(worker);
+  for (const file of scripts || []) referenced.push(file);
   if (manifest.action?.default_popup) referenced.push(manifest.action.default_popup);
 
   for (const [size, file] of Object.entries(manifest.icons || {})) referenced.push(file);
@@ -467,6 +499,71 @@ function checkPickerWiring() {
   }
 }
 
+/* ------------------------------------------------------------ store buttons */
+
+/**
+ * The install page shows a store button only for a store app.js knows a
+ * listing URL for. A `data-store` value with no matching STORE_LINKS key is
+ * dead markup: the button would be removed on load and never come back, no
+ * matter what URL is pasted in later.
+ */
+function checkStoreButtons() {
+  console.log('\nstore buttons');
+
+  const html = fs.readFileSync(path.join(ROOT, 'site', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(ROOT, 'site', 'app.js'), 'utf8');
+
+  html.includes('data-store-button')
+    ? pass('the store button is wired into the page')
+    : fail('index.html has no store button - the adaptive install link would never render');
+
+  html.includes('data-zip')
+    ? pass('the zip download stays alongside it')
+    : fail('index.html no longer offers the zip - the pre-listing install path would vanish');
+
+  const linksAt = app.indexOf('const STORE_LINKS');
+  if (linksAt < 0) {
+    fail('app.js no longer defines STORE_LINKS - no listing could ever be linked');
+    return;
+  }
+
+  const linksBlock = app.slice(linksAt, app.indexOf('};', linksAt));
+  const known = [...linksBlock.matchAll(/^\s*([a-z]+):/gm)].map((m) => m[1]);
+  pass(`stores that can be linked: ${known.join(', ')}`);
+
+  // Every browser in the detection table must name a store that exists. One bad
+  // key and that browser silently gets no button, however the URL is filled in.
+  const browsersAt = app.indexOf('const BROWSERS');
+  if (browsersAt < 0) {
+    fail('app.js no longer detects a browser - the button would always say Chrome');
+    return;
+  }
+
+  app.includes('selfReportedBrowser')
+    ? pass('the browser is asked to name itself before any user-agent matching')
+    : fail('app.js no longer reads userAgentData - the name would always come from a table');
+
+  // Every store reference anywhere in the file must name a store that exists,
+  // or that browser silently loses its button however the URL is filled in.
+  const mapped = [...app.matchAll(/store: '([a-z]+)'/g)].map((m) => m[1]);
+
+  if (!mapped.length) {
+    fail('no browser anywhere in app.js is mapped to a store');
+  } else {
+    const unknown = [...new Set(mapped)].filter((name) => !known.includes(name));
+    unknown.length
+      ? fail(`browser mapped to a store with no link: ${unknown.join(', ')}`)
+      : pass(`${mapped.length} store references, all known`);
+  }
+
+  const browsersBlock = app.slice(browsersAt, app.indexOf('\n];', browsersAt));
+  for (const name of ['Brave', 'Comet', 'Edge', 'Vivaldi', 'Opera', 'Firefox', 'Safari']) {
+    browsersBlock.includes(`'${name}'`)
+      ? pass(`${name} named in the user-agent fallback`)
+      : fail(`${name} dropped from the fallback table - its button would say Chrome`);
+  }
+}
+
 /* ------------------------------------------------------------------ package */
 
 function run() {
@@ -479,6 +576,7 @@ function run() {
   checkSelectors();
   checkOrigin();
   checkPickerWiring();
+  checkStoreButtons();
 
   console.log('');
   if (problems.length) {

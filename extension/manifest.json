@@ -2,12 +2,19 @@
   "manifest_version": 3,
   "name": "Freebuff Ad Block",
   "short_name": "FB Ad Block",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "Blocks ads on freebuff.com in Chrome, Edge and Brave. Site-scoped, no tracking, no accounts.",
   "permissions": ["declarativeNetRequest", "storage"],
   "host_permissions": ["*://freebuff.com/*", "*://*.freebuff.com/*"],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "{7b3d9c4a-1e62-4f58-9c07-2ab5e8d41f93}",
+      "strict_min_version": "115.0"
+    }
   },
   "action": {
     "default_popup": "popup.html",

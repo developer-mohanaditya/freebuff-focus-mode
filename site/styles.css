@@ -181,6 +181,13 @@ strong {
   margin-top: 36px;
 }
 
+/* The store button carries `hidden` until app.js finds a listing for the
+   browser it is being read in. `.btn` sets its own display, so the attribute
+   needs to win explicitly. */
+[data-store-button][hidden] {
+  display: none !important;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
