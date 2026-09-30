@@ -12,6 +12,8 @@
  * Safety rules this file must never break:
  *   - Never hide <html>, <head>, <body> or any landmark/shell element.
  *   - Never hide a subtree that carries real content (see hasRealContent).
+ *   - Never hide the product's own working UI (see LIVE_UI_SELECTOR): the
+ *     reasoning toggle, the status line, the progress meter.
  *   - Never fight the build stream: no network activity, no XHR, no fetch.
  *
  * Detection is deliberately three-tiered:
@@ -214,6 +216,22 @@
   const REAL_CONTENT_SELECTOR =
     'pre, code, textarea, input, [contenteditable="true"], video, audio';
 
+  // Block-level content. A strip of an ad - an icon and a line of copy - holds
+  // none of it, and that is what tells a toolbar strip apart from a card.
+  const BLOCK_CONTENT_SELECTOR =
+    'div, p, section, article, aside, header, footer, main, nav, ul, ol, li, ' +
+    'table, form, blockquote, h1, h2, h3, h4, h5, h6';
+
+  // Live app UI - the parts of the page that only exist while the product is
+  // working: the progress meter, the status line, the streamed log, and the
+  // controls that open a popover. None of it can be part of an ad, so this
+  // doubles as a boundary: it stops the card search from climbing out of the ad
+  // and into the message, and it stops the wrapper collapse from taking a turn
+  // that is about to receive the reasoning toggle and the progress meter.
+  const LIVE_UI_SELECTOR =
+    '[role="progressbar"], [role="status"], [role="log"], [role="alert"], ' +
+    '[aria-haspopup], [contenteditable="true"]';
+
   const ANY_MEDIA_SELECTOR = 'iframe, embed, object, ins, video, audio, source, img';
 
   const AD_MEDIA_SELECTOR = AD_HOSTS.map(
@@ -236,14 +254,37 @@
     TIER_A_GROUPS.push(TIER_A_ENTRIES.slice(i, i + 5).join(', '));
   }
 
-  const TIER_A_SELECTOR = TIER_A_ENTRIES.join(', ');
+  // Hooks the ad network drops *into* a layout row rather than standing on
+  // their own - the strip inside the preview toolbar is the one that matters.
+  // These must not be taken out of the flow: the row they sit in reflows and
+  // everything beside them slides to the left. So the stylesheet empties them
+  // where they stand, and the script leaves their slot alone.
+  const SLOT_ENTRIES = [
+    '[data-gravity-ad]',
+    '[data-gravity-ad-slot]',
+    '[data-gravity-ad-unit]',
+    '[data-gravity-sponsored]',
+    'a[rel~="sponsored"]',
+    'a[href*="/track/click"]',
+  ];
+
+  const SLOT_SELECTOR = SLOT_ENTRIES.join(', ');
+
+  const HIDE_SELECTOR = TIER_A_ENTRIES.filter((e) => !SLOT_ENTRIES.includes(e)).join(', ');
 
   const CANDIDATE_SELECTOR = TOKEN_SOURCE_ATTRS.map((a) => `[${a}]`).join(', ');
 
   const css = [
-    `${TIER_A_SELECTOR} {`,
+    `${HIDE_SELECTOR} {`,
     '  display: none !important;',
     '  visibility: hidden !important;',
+    '}',
+    // Invisible, un-clickable, still exactly where it was. The contents go with
+    // the box - visibility is inherited - so the ad shows nothing at all while
+    // the row keeps the width it had.
+    `${SLOT_SELECTOR} {`,
+    '  visibility: hidden !important;',
+    '  pointer-events: none !important;',
     '}',
     `.${HIDDEN_CLASS} {`,
     '  display: none !important;',
@@ -263,6 +304,15 @@
   let observer = null;
   const pending = new Set();
   const pendingBadges = new Set();
+  // Elements un-hidden on purpose. Removing our own class is a DOM change like
+  // any other, and it reaches the observer looking exactly like a re-render
+  // that stripped the class - the re-hide path must not put it straight back.
+  const justUnhidden = new Set();
+  // Ads neutralised in place instead of hidden. They are still blocked - the
+  // stylesheet genuinely removes what you can see - so they belong in the
+  // count, but a later scan walks the same element again and must not count it
+  // a second time.
+  const countedInPlace = new WeakSet();
   let scheduled = false;
   let hiddenThisFlush = 0;
   let hiddenTotal = 0;
@@ -350,6 +400,19 @@
     return textLength(el) > MAX_HEURISTIC_TEXT;
   }
 
+  /**
+   * True when el is, or contains, live app UI. The product's own working parts
+   * are never an ad and never part of one, so a wrapper holding them is page
+   * structure no matter how small it happens to measure right now.
+   */
+  function hasLiveUI(el) {
+    try {
+      return el.matches(LIVE_UI_SELECTOR) || !!el.querySelector(LIVE_UI_SELECTOR);
+    } catch {
+      return false;
+    }
+  }
+
   /* ------------------------------------------------------- user-picked rules */
 
   function injectCustomStyle() {
@@ -425,6 +488,11 @@
     let actions;
     try {
       if (node.querySelector(REAL_CONTENT_SELECTOR)) return false;
+      // A card never holds the app's own working UI. This is the guard that
+      // keeps the climb out of the message around the card: a turn carrying the
+      // progress meter, a status line or a popover control is page structure,
+      // not a promo unit, even while those parts have not mounted yet.
+      if (hasLiveUI(node)) return false;
       actions = node.querySelectorAll(PROMO_ACTION_SELECTOR).length;
     } catch {
       return false;
@@ -455,6 +523,18 @@
 
     while (node && node !== document.body && depth < MAX_PROMO_DEPTH) {
       if (isNeverHidden(node)) break;
+
+      // The ad element itself is the hard ceiling. A badge inside a tier A or
+      // network-marked element belongs to that element; everything above it is
+      // page structure that merely contains the ad. Climbing past this is how
+      // the ad's own turn - reasoning toggle and progress meter included - got
+      // hidden with it: the wrapper still measured as "small, few actions" a
+      // moment before those parts mounted.
+      if (matchesTierA(node) || hasNetworkAttribute(node)) {
+        card = node;
+        break;
+      }
+
       if (isPromoCard(node)) card = node;
       else if (card) break;
       node = node.parentElement;
@@ -468,6 +548,10 @@
     if (el.nodeType !== Node.ELEMENT_NODE || !isBadge(el)) return;
     const card = findPromoCard(el);
     if (!card) return;
+    if (sitsInRow(card)) {
+      countInPlace(card);
+      return;
+    }
     if (hide(card)) collapseUp(card);
   }
 
@@ -542,6 +626,61 @@
     return true;
   }
 
+  /** Count an ad the stylesheet emptied where it stood. */
+  function countInPlace(el) {
+    if (countedInPlace.has(el)) return;
+    countedInPlace.add(el);
+    hiddenThisFlush++;
+    hiddenTotal++;
+  }
+
+  /**
+   * True when node lays its children out as a horizontal row - a toolbar, a
+   * control strip. Read from computed style rather than from a class name: the
+   * page writes these with utility classes, and what makes a row a row is how
+   * it lays out, not what it is called.
+   */
+  function isFlexRow(node) {
+    if (!node) return false;
+    let style;
+    try {
+      style = getComputedStyle(node);
+    } catch {
+      return false;
+    }
+    if (!style) return false;
+    if (style.display !== 'flex' && style.display !== 'inline-flex') return false;
+    const direction = style.flexDirection;
+    return !direction || direction === 'row' || direction === 'row-reverse';
+  }
+
+  /** True when el holds no block-level content: a strip, not a card. */
+  function isCompact(el) {
+    try {
+      return !el.querySelector(BLOCK_CONTENT_SELECTOR);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * True when el is a strip the page has dropped into an existing layout row.
+   * Removing one of these is what pulls the controls beside it to the left, so
+   * they keep their box and lose only what is inside it.
+   *
+   * Both shapes count: the ad is a direct item of a row, or it sits alone in a
+   * one-child container that is itself the row item - which is the preview
+   * toolbar strip, wrapped in its own `flex w-full` div.
+   */
+  function sitsInRow(el) {
+    if (!isCompact(el)) return false;
+    const parent = el.parentElement;
+    if (!parent) return false;
+    if (isFlexRow(parent)) return true;
+    if (parent.children.length > 1) return false;
+    return isFlexRow(parent.parentElement);
+  }
+
   /**
    * Walk up from a hidden ad and hide ancestors that contain nothing but the
    * ad itself, reclaiming the blank space a removed slot would leave.
@@ -554,6 +693,11 @@
 
     while (node && depth < 6) {
       if (isNeverHidden(node)) break;
+      if (hasLiveUI(node)) break;
+      // A wrapper that is itself an item in a row is left where it is: the ad
+      // inside it is already invisible, and taking the wrapper out of the flow
+      // is exactly what drags the row's other controls across to the left.
+      if (sitsInRow(node)) break;
       if (!isPureAdWrapper(node)) break;
       hide(node);
       node = node.parentElement;
@@ -587,6 +731,7 @@
     while (node && depth < 8 && node.classList && node.classList.contains(HIDDEN_CLASS)) {
       if (isNeverHidden(node)) break;
       node.classList.remove(HIDDEN_CLASS);
+      justUnhidden.add(node);
       node = node.parentElement;
       depth++;
     }
@@ -623,12 +768,28 @@
    * an ad.
    */
   function rescue(el) {
-    const parent = el.parentElement;
-    if (!parent || !parent.classList.contains(HIDDEN_CLASS)) return;
-    if (isStillAd(parent)) return;
+    const hidden = nearestHiddenAncestor(el);
+    if (!hidden) return;
     // A rule someone made by hand is never second-guessed.
-    if (matchesCustom(parent)) return;
-    unhideFrom(parent);
+    if (matchesCustom(hidden)) return;
+    // Live UI inside a wrapper we hid means the hide took real product UI with
+    // it. The ad element keeps its own hidden class, so bringing the wrapper
+    // back costs nothing, and it is the only way the reasoning toggle and the
+    // progress meter can return once they mount inside it.
+    if (isStillAd(hidden) && !hasLiveUI(hidden)) return;
+    unhideFrom(hidden);
+  }
+
+  /** The first ancestor carrying the hidden class, within a small window. */
+  function nearestHiddenAncestor(el) {
+    let node = el.parentElement;
+    let depth = 0;
+    while (node && depth < 6) {
+      if (node.classList && node.classList.contains(HIDDEN_CLASS)) return node;
+      node = node.parentElement;
+      depth++;
+    }
+    return null;
   }
 
   /* ------------------------------------------------------------------ sweep */
@@ -636,6 +797,14 @@
   function process(el, tier) {
     if (!tier) {
       rescue(el);
+      return;
+    }
+    // A strip sitting in a layout row keeps its slot. The stylesheet has
+    // already taken it out of sight without moving it, so hiding it here - or
+    // collapsing the wrapper around it - is the very thing that reflows the
+    // row and shifts everything beside it.
+    if (sitsInRow(el)) {
+      countInPlace(el);
       return;
     }
     hide(el);
@@ -858,6 +1027,8 @@
         // the class straight back rather than rescanning - the old value proves
         // this element was one we hid, and re-adding it fires no further change.
         if (record.type === 'attributes') {
+          // A class change we made ourselves is not a re-render.
+          if (justUnhidden.delete(record.target)) continue;
           if (lostHiddenClass(record)) hide(record.target, false);
           continue;
         }

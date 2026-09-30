@@ -1,6 +1,6 @@
 {
   "name": "freebuff-ad-block",
-  "version": "1.2.0",
+  "version": "1.2.2",
   "private": true,
   "type": "module",
   "description": "Chromium MV3 extension that blocks ads on freebuff.com, plus its install page.",

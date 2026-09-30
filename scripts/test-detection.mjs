@@ -82,7 +82,7 @@ const sendMessage = (type) => messageListeners.forEach((fn) => fn({ type }, {}, 
 window.chrome = {
   runtime: {
     lastError: null,
-    getManifest: () => ({ version: '1.2.0' }),
+    getManifest: () => ({ version: '1.2.2' }),
     sendMessage: () => undefined,
     onMessage: { addListener: (fn) => messageListeners.push(fn) },
   },
@@ -247,6 +247,61 @@ check('tracking href alone is enough', hidden('href-only'), true);
 check('data-gravity-ad alone is enough', hidden('data-only'), true);
 check('messages around them stay visible', hidden('assistant'), false);
 
+// The shape that was still wrong: the ad is the only child of a full-width
+// wrapper, and the wrapper is one item of the preview toolbar beside the back
+// button and the stop button. Hiding the wrapper took the whole slot out of
+// the row, so the controls next to it slid to the left. The strip keeps its
+// place now - the stylesheet empties it where it stands.
+console.log('\npreview strip: ad is the only child of a row item');
+const stripRow = document.createElement('div');
+stripRow.id = 'strip-row';
+stripRow.className = 'preview-toolbar';
+stripRow.style.display = 'flex';
+stripRow.innerHTML =
+  '<button id="strip-back">back</button>' +
+  '<div id="strip-slot" class="flex w-full min-w-0 items-center" style="display: flex;">' +
+  '<a id="strip-ad" href="https://api.trygravity.ai/track/click?p=abc123" target="_blank" rel="noopener noreferrer sponsored" data-gravity-ad="true" class="group flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 no-underline" data-state="closed">' +
+  '<img alt="" loading="lazy" class="h-4 w-4 shrink-0 rounded-sm object-contain" src="https://icons.duckduckgo.com/ip3/www.baseten.co.ico">' +
+  '<span class="shrink-0 text-[11px] font-semibold text-foreground/80">Baseten</span>' +
+  '<span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">Deploy mission-critical AI inference on dedicated cloud or VPC deployments with Baseten.</span>' +
+  '</a></div>' +
+  '<button id="strip-stop">stop</button>';
+document.querySelector('.thread').appendChild(stripRow);
+await new Promise((r) => setTimeout(r, 60));
+check('wrapper holding only the strip stays in the flow', hidden('strip-slot'), false);
+check('toolbar row keeps its shape', hidden('strip-row'), false);
+check('control before the strip stays put', hidden('strip-back'), false);
+check('control after the strip stays put', hidden('strip-stop'), false);
+check('strip is not taken out of the flow', hidden('strip-ad'), false);
+check('strip keeps its contents in the DOM', document.getElementById('strip-ad').children.length, 3);
+check(
+  'stylesheet empties such a strip in place',
+  /pointer-events: none !important/.test(
+    document.getElementById('freebuff-adblock-style').textContent
+  ),
+  true
+);
+
+// Only a strip gets to keep its slot. A card that happens to sit in a row is
+// still removed for good, wrapper included - the block-level content inside it
+// is what rules the in-place treatment out.
+console.log('\npreview strip: a card in the same spot is still removed');
+const rowCard = document.createElement('div');
+rowCard.id = 'row-card-row';
+rowCard.style.display = 'flex';
+rowCard.innerHTML =
+  '<div id="row-card-slot">' +
+  '<a id="row-card-ad" href="https://api.trygravity.ai/track/click?p=abc123" rel="noopener noreferrer sponsored" data-gravity-ad="true" style="display: flex; flex-direction: column;">' +
+  '<div><span>Coderabbit</span><span id="row-card-chip">Ad</span></div>' +
+  '<p>More code should not mean less review.</p></a></div>' +
+  '<button id="row-card-stop">stop</button>';
+document.querySelector('.thread').appendChild(rowCard);
+await new Promise((r) => setTimeout(r, 60));
+check('card-shaped ad in a row is hidden outright', hidden('row-card-ad'), true);
+check('the wrapper it filled goes with it', hidden('row-card-slot'), true);
+check('the row itself stays visible', hidden('row-card-row'), false);
+check('control beside the removed card stays visible', hidden('row-card-stop'), false);
+
 // A saved rule has to be honoured on load, and has to survive the card rebuild
 // that used to tear hides down.
 console.log('\nsaved rules and unseen slot names');
@@ -267,6 +322,85 @@ variant.textContent = 'A slot name we had never seen';
 document.querySelector('.thread').appendChild(variant);
 await new Promise((r) => setTimeout(r, 40));
 check('unseen data-gravity-ad-* slot name is caught', hidden('gravity-variant'), true);
+
+// The reported false positive, from the live page: a thread ad whose "Ad" chip
+// sits inside the same .turn as the response's own working UI. The card search
+// used to climb out of the ad and hide the whole turn - reasoning toggle and
+// progress meter included - and the ad's badge then stopped the rescue from
+// putting it back. The real shape: <a data-gravity-ad> holding the chip, with
+// the reasoning toggle and the progress meter mounted into the same turn below.
+console.log('\nturn sharing the ad with the response UI');
+const turn = document.createElement('div');
+turn.className = 'turn';
+turn.id = 'turn';
+turn.innerHTML =
+  '<div class="msg user" id="turn-user">' +
+  '<div class="bubble user-message-bubble"><div class="user-message-text">Ship it</div></div>' +
+  '<div class="msg-footer"><span class="msg-time">10:49 PM</span>' +
+  '<button type="button" class="icon-button quiet control-small" aria-label="Restore to here" aria-haspopup="dialog" data-state="closed">undo</button>' +
+  '</div></div>' +
+  '<div class="my-8 w-full max-w-full text-sm" id="turn-adwrap">' +
+  '<a id="turn-ad" href="https://api.trygravity.ai/track/click?p=abc123" target="_blank" rel="noopener noreferrer sponsored" class="w-full" data-gravity-ad="true">' +
+  '<div style="display: flex; gap: 8px;">' +
+  '<img alt="" src="https://icons.duckduckgo.com/ip3/www.coderabbit.ai.ico">' +
+  '<span>Coderabbit</span><span id="turn-adchip">Ad</span>' +
+  '</div>' +
+  '<p>More code should not mean less review.</p>' +
+  '</a></div>';
+document.querySelector('.thread').appendChild(turn);
+await new Promise((r) => setTimeout(r, 60));
+
+check('ad card inside the turn is hidden', hidden('turn-ad'), true);
+check('turn holding the ad stays visible while the ad is alone', hidden('turn'), false);
+
+// The response parts mount into the same turn a moment after the ad.
+const turnAssistant = document.createElement('div');
+turnAssistant.className = 'msg assistant cloud-parts';
+turnAssistant.id = 'turn-assistant';
+turnAssistant.innerHTML =
+  '<div><div data-state="closed"><button type="button" class="acts-toggle live" id="turn-reasoning">Reasoning</button></div></div>';
+turn.appendChild(turnAssistant);
+
+const turnProgress = document.createElement('div');
+turnProgress.className = 'min-h-[2.75rem]';
+turnProgress.id = 'turn-progress';
+turnProgress.innerHTML =
+  '<div class="my-2 w-full max-w-lg"><div class="flex items-center gap-3">' +
+  '<span class="truncate" id="turn-status"><span class="fb-text-body-sm shim-text">Thinking</span>' +
+  '<span class="mx-1.5 text-content-disabled">·</span><span class="text-content-muted">reasoning is streaming above</span></span>' +
+  '<span class="fb-text-mono shrink-0 text-[11px] tabular-nums text-content-subtle">55s</span>' +
+  '<div class="fb-meter fb-meter--a2 mt-2" id="turn-meter" role="progressbar" aria-label="Estimated run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="34"><i style="width: 34%;"></i></div>' +
+  '</div></div>';
+turn.appendChild(turnProgress);
+await new Promise((r) => setTimeout(r, 80));
+
+check('the turn itself stays visible', hidden('turn'), false);
+check('the ad card is still hidden', hidden('turn-ad'), true);
+check('the reasoning toggle stays visible', hidden('turn-reasoning'), false);
+check('the progress meter stays visible', hidden('turn-meter'), false);
+check('the status line stays visible', hidden('turn-status'), false);
+
+// The same shape, but the ad lands before anything else mounts, so the wrapper
+// really is collapsed with it. Live UI arriving inside has to bring it back.
+const early = document.createElement('div');
+early.className = 'turn';
+early.id = 'turn-early';
+early.innerHTML =
+  '<div class="my-8 w-full max-w-full text-sm" id="early-adwrap">' +
+  '<a id="early-ad" href="https://api.trygravity.ai/track/click?p=abc123" rel="noopener noreferrer sponsored" data-gravity-ad="true">' +
+  '<span>Coderabbit</span><span>Ad</span></a></div>';
+document.querySelector('.thread').appendChild(early);
+await new Promise((r) => setTimeout(r, 60));
+check('turn holding only the ad is collapsed with it', hidden('turn-early'), true);
+
+const earlyProgress = document.createElement('div');
+earlyProgress.id = 'early-progress';
+earlyProgress.innerHTML =
+  '<span>Thinking</span><div role="progressbar" aria-label="Estimated run progress" aria-valuenow="12"><i></i></div>';
+early.appendChild(earlyProgress);
+await new Promise((r) => setTimeout(r, 80));
+check('turn is restored once live UI mounts inside it', hidden('turn-early'), false);
+check('the ad itself stays hidden after the restore', hidden('early-ad'), true);
 
 // The escape hatch: an ad shape nothing recognises, hidden by hand.
 console.log('\npicker');
