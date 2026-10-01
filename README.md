@@ -184,6 +184,7 @@ site/               the install page and everything it serves
   store-assets/       the listing art
   downloads/          the built zips
 dist/               static output - served by the preview and by hosting
+LICENSE             MIT
 PUBLISHING.md       step-by-step store submissions, plus the listing copy
 ```
 
@@ -231,3 +232,15 @@ update themselves.
 
 Web version only. The desktop application is a separate binary with no
 extension surface, so a browser extension cannot reach it.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
+
+In short: use it, fork it, ship it, sell it, keep your changes to yourself if
+you like. The only condition is that the copyright notice and this permission
+notice travel with any copy or substantial portion of the code.
+
+Every store form that asks which licence you grant — addons.mozilla.org, the
+Edge Add-ons dashboard — should be answered **MIT License**, so the listing and
+this repository say the same thing.
