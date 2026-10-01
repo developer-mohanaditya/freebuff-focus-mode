@@ -59,6 +59,15 @@ function resolveRequest(urlPath) {
   if (fs.existsSync(target) && fs.statSync(target).isDirectory()) {
     target = path.join(target, 'index.html');
   }
+
+  // Production serves this site with `cleanUrls`, so /privacy is the canonical
+  // URL and privacy.html is the file behind it. Mirror that here, or a link
+  // that works in production 404s in the preview.
+  if (!fs.existsSync(target) && path.extname(target) === '') {
+    const withHtml = `${target}.html`;
+    if (fs.existsSync(withHtml) && fs.statSync(withHtml).isFile()) return withHtml;
+  }
+
   if (!fs.existsSync(target) || !fs.statSync(target).isFile()) return null;
 
   return target;

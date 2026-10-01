@@ -603,6 +603,71 @@ strong {
   font-size: 15.5px;
 }
 
+/* ---------------------------------------------------------------- policy */
+
+.page-head h1 {
+  margin: 0;
+  font-size: clamp(32px, 4.6vw, 52px);
+  line-height: 1.08;
+  letter-spacing: -0.032em;
+  font-weight: 700;
+}
+
+.policy {
+  max-width: 74ch;
+  margin-top: 46px;
+}
+
+.policy h2 {
+  margin: 38px 0 12px;
+  font-size: 21px;
+  letter-spacing: -0.018em;
+  font-weight: 640;
+}
+
+.policy h2:first-child {
+  margin-top: 0;
+}
+
+.policy p {
+  margin: 0 0 15px;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.policy p:last-child {
+  margin-bottom: 0;
+}
+
+.policy ul {
+  margin: 0 0 15px;
+  padding-left: 22px;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.policy li {
+  margin-bottom: 10px;
+}
+
+.policy li:last-child {
+  margin-bottom: 0;
+}
+
+.policy strong,
+.policy em {
+  color: var(--text);
+  font-style: normal;
+}
+
+.policy a {
+  color: var(--accent);
+}
+
+.policy .fine {
+  margin-top: 22px;
+}
+
 /* ---------------------------------------------------------------- footer */
 
 .footer {
@@ -616,6 +681,17 @@ strong {
   margin: 0 0 6px;
   font-size: 14px;
   color: var(--muted);
+}
+
+.footer a {
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.footer a:hover {
+  color: var(--accent);
+  border-bottom-color: rgba(255, 90, 69, 0.5);
 }
 
 /* ---------------------------------------------------------------- reveal */

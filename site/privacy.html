@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy policy — Freebuff Ad Block</title>
+    <meta
+      name="description"
+      content="Freebuff Ad Block collects nothing. No accounts, no analytics, no telemetry, no remote code — what the extension does and does not do with your data."
+    />
+    <meta name="theme-color" content="#0b0d12" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="grid-bg" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M5.6 5.6 18.4 18.4" />
+          </svg>
+        </span>
+        <span class="brand-name">Freebuff Ad Block</span>
+      </a>        <span class="pill">v<span data-version>1.3.0</span></span>
+    </header>
+
+    <main>
+      <section class="section">
+        <div class="section-head page-head reveal">
+          <p class="eyebrow">Privacy</p>
+          <h1>Privacy policy</h1>
+          <p class="section-sub">
+            Freebuff Ad Block collects nothing. This page spells out exactly what that means: what
+            the extension does, what stays on your own machine, and the one thing your browser may
+            sync without asking us anything.
+          </p>
+        </div>
+
+        <ul class="facts reveal" role="list">
+          <li><span class="fact-k">Data collected</span><span class="fact-v">None</span></li>
+          <li><span class="fact-k">Accounts</span><span class="fact-v">None</span></li>
+          <li><span class="fact-k">Remote code</span><span class="fact-v">None</span></li>
+          <li>
+            <span class="fact-k">Its own requests</span><span class="fact-v">None, ever</span>
+          </li>
+        </ul>
+
+        <div class="policy reveal">
+          <h2>The short version</h2>
+          <p>
+            Freebuff Ad Block has no server and no backend. It does not collect, store, transmit,
+            sell or share personal data, and it never contacts anything operated by us. All of its
+            work happens locally in your browser, on one site: <strong>freebuff.com</strong>.
+          </p>
+
+          <h2>What the extension does</h2>
+          <p>
+            It removes the advertising slots that appear inside the freebuff.com web app. It does
+            that in three ways: a <code>declarativeNetRequest</code> ruleset stops requests to known
+            ad and tracker hosts before they leave the tab, a content script clears out slots the
+            page injects while a build is running, and a picker lets you hide anything the
+            heuristics miss. Nothing in that process reads, copies or sends your data anywhere.
+          </p>
+
+          <h2>What is stored, and where</h2>
+          <p>
+            Two things, both in your browser's own extension storage. We have no way to read either:
+          </p>
+          <ul>
+            <li>
+              <strong>Your on/off setting</strong> — one boolean, whether blocking is enabled.
+            </li>
+            <li>
+              <strong>Element rules you create yourself</strong> — the CSS selectors saved when you
+              use <em>Hide an element on the page</em>.
+            </li>
+          </ul>
+          <p>
+            These live under the keys <code>freebuffAdBlockEnabled</code> and
+            <code>freebuffAdBlockSelectors</code>. If you are signed in to Chrome, Edge or Brave,
+            your browser may sync extension storage through your own account
+            (<code>storage.sync</code>). That transfer is between you and your browser vendor, under
+            their privacy policy — it never passes through us, because there is nothing of ours for
+            it to pass through. Signing out or disabling browser sync keeps the data entirely on
+            the device.
+          </p>
+          <p>
+            A per-tab count of hidden elements is kept in <code>storage.session</code> so the toolbar
+            badge can show it. Session storage is cleared by the browser when it closes, and it is
+            never written to disk by us.
+          </p>
+
+          <h2>Network activity</h2>
+          <p>
+            The extension makes <strong>no network requests of its own</strong>. There is no
+            analytics, no telemetry, no crash reporting, no update ping, no remote configuration and
+            no advertising SDK. Every part of it — the ruleset, the content script, the popup —
+            ships inside the package, so there is no remote code to fetch and nothing to execute
+            that did not arrive with the install.
+          </p>
+          <p>
+            It does change what your browser requests on freebuff.com: the ruleset blocks requests
+            to known ad and tracker hosts when those requests originate from a freebuff.com page. A
+            blocked request is dropped locally. That event is not logged, counted or reported
+            anywhere. A priority-100 <code>allow</code> rule covers freebuff.com's own traffic, so
+            the extension never blocks the site itself.
+          </p>
+
+          <h2>Permissions, and why each one is needed</h2>
+          <ul>
+            <li>
+              <strong><code>declarativeNetRequest</code></strong> — block requests to known
+              ad-network hosts that originate from freebuff.com pages.
+            </li>
+            <li>
+              <strong><code>storage</code></strong> — remember your on/off setting and the element
+              rules you create with the picker.
+            </li>
+            <li>
+              <strong>Host access: <code>*://freebuff.com/*</code> and
+              <code>*://*.freebuff.com/*</code></strong> — the content script has to read
+              freebuff.com pages to find and hide the ad slots the page renders itself.
+            </li>
+          </ul>
+          <p>
+            That is the whole list. The extension requests nothing else: no access to your other
+            tabs, your browsing history, your bookmarks, your downloads or your clipboard, and no
+            ability to inject anything into a site other than freebuff.com.
+          </p>
+
+          <h2>Third parties</h2>
+          <p>
+            There are none in the product. No analytics providers, no advertising networks, no data
+            brokers, no affiliates and no SDKs receive anything from this extension. The only third
+            parties involved are the browser vendors: if you install from the Chrome Web Store,
+            Microsoft Edge Add-ons or addons.mozilla.org, that store handles the download and any
+            review under its own privacy policy.
+          </p>
+
+          <h2>This website</h2>
+          <p>
+            The page you are reading is static HTML, CSS and JavaScript. It sets no cookies, runs no
+            analytics, loads no third-party scripts, fonts or pixels, and does not profile you in
+            any way. Our hosting provider keeps standard server access logs — IP address, user
+            agent, requested path — for security and abuse prevention, as any web host does.
+          </p>
+
+          <h2>Children</h2>
+          <p>
+            The extension is not directed at children under 13. Because it collects no data at all,
+            there is no personal information from any age group to manage, disclose or delete.
+          </p>
+
+          <h2>Changes to this policy</h2>
+          <p>
+            If the extension's data behaviour ever changes, this page is updated before that version
+            ships. The extension is built so that a change in data handling would be visible in its
+            source: there is no server to quietly start talking to.
+          </p>
+
+          <h2>Contact</h2>
+          <p>
+            Questions, or a privacy concern? Email
+            <a href="mailto:workofma@gmail.com">workofma@gmail.com</a>, or open an issue at
+            <a
+              href="https://github.com/developer-mohanaditya/freebuff-ad-blocker/issues"
+              rel="noopener"
+              >github.com/developer-mohanaditya/freebuff-ad-blocker/issues</a
+            >.
+          </p>
+
+          <p class="fine">Last updated: 1 October 2026 · applies to Freebuff Ad Block 1.3.0 and later.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        Freebuff Ad Block · v<span data-version>1.3.0</span> · site-scoped, no accounts, no
+        telemetry.
+      </p>
+      <p class="fine">
+        <a href="/">Install page</a> ·
+        <a href="https://github.com/developer-mohanaditya/freebuff-ad-blocker/issues" rel="noopener"
+          >Report an issue</a
+        >
+      </p>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>

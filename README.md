@@ -1,10 +1,44 @@
 # Freebuff Ad Block
 
-A Chromium and Firefox (Manifest V3) extension that removes ads on
-**freebuff.com**, plus the static page that distributes it.
+**The ads stop. The build keeps streaming.**
 
-Site-scoped by design: it touches freebuff.com and nothing else. No accounts, no
-backend, no database, no telemetry.
+An extension for Chromium and Firefox (Manifest V3) that removes the ads on
+**freebuff.com**: the network-served slots, the ones the page injects while a
+build is thinking, and the product's own in-line "AD" cards.
+
+Site-scoped by design — it touches freebuff.com and nothing else. No accounts,
+no backend, no database, no telemetry, and nothing to configure.
+
+[Install it](https://freebuff-adblocker.vercel.app/) ·
+[Privacy policy](https://freebuff-adblocker.vercel.app/privacy) ·
+[Report an issue](https://github.com/developer-mohanaditya/freebuff-ad-blocker/issues)
+
+## Install
+
+Neither Chromium nor Firefox will install an unsigned extension from a link, so
+until the store listings are live the path is loading the extracted folder as a
+developer extension. It behaves exactly like an installed one — in Chromium it
+persists, in Firefox a temporary add-on lasts until the browser restarts.
+
+**Chromium** (Chrome, Edge, Brave, Opera, Vivaldi, Comet…)
+
+1. Download the zip from the install page and extract it somewhere permanent.
+   If you move the folder later, Chrome reports the extension as unloaded and
+   you have to point it at the new path again.
+2. Open `chrome://extensions` (or `edge://extensions`, `brave://extensions`).
+3. Enable **Developer mode** → **Load unpacked** → pick the extracted
+   `freebuff-adblock` folder.
+4. Reload any freebuff.com tabs that were already open.
+
+**Firefox**
+
+1. Open `about:debugging#/runtime/this-firefox`.
+2. **Load Temporary Add-on** → pick `manifest.json` inside the extracted
+   Firefox zip.
+
+Once a listing exists, the install page's hero button works out which browser is
+reading it and points at the store that serves that browser — no wrong-store
+links, and no button at all for a browser that cannot install it.
 
 ## Why three layers
 
@@ -57,6 +91,11 @@ One build writes three packages:
 | `freebuff-adblock-<version>-store.zip` | Chrome Web Store and Edge Add-ons — `manifest.json` at the archive root |
 | `freebuff-adblock-<version>-firefox.zip` | addons.mozilla.org — the same, plus the event-page background |
 
+The zips are reproducible: entries are stamped with the ZIP epoch rather than
+the build time (or `SOURCE_DATE_EPOCH` when it is set), so two builds of the
+same sources are byte-identical and a signed package can be matched back to a
+commit.
+
 ## The ad network, and what happens when it changes
 
 The in-product slots are not hand-built by freebuff.com. They arrive from an ad
@@ -98,6 +137,12 @@ structural paths break the moment a layout changes.
 Deliberate rules are applied last in every pass and are never second-guessed by
 `rescue()`, so a rule you made by hand outranks anything inferred.
 
+## Privacy
+
+The extension has one host permission, no network requests of its own, and no
+analytics. What it stores, and what it does not, is written out in
+[`site/privacy.html`](site/privacy.html) — the policy both stores link to.
+
 ## Layout
 
 ```
@@ -117,62 +162,46 @@ scripts/            zero-dependency build tooling
   test-site.mjs       jsdom checks: the install page's store button
   zip.mjs             minimal ZIP writer
   png.mjs             minimal PNG encoder + icon artwork
+  store-assets.mjs    promo tile, marquee, and the four listing screenshots
   gen-icons.mjs       force-regenerate icons
-site/               install page source
+site/               the install page and everything it serves
   index.html          markup; the version is stamped in at build time
   styles.css
   app.js              store-button detection; paste listing URLs into STORE_LINKS
+  privacy.html        the policy both stores link to
+  store-assets/       the listing art
+  downloads/          the built zips
 dist/               static output - served by the preview and by hosting
 PUBLISHING.md       step-by-step store submissions, plus the listing copy
 ```
 
-There are no npm dependencies. The production build image is Node-only and
-uploaded files lose their executable bit, so the packaging step is plain Node
-rather than a `zip` shell-out.
+There are no npm dependencies. Uploaded files lose their executable bit, so the
+packaging step is plain Node rather than a `zip` shell-out.
 
 ## Commands
 
 ```sh
 npm run build     # package both zips -> site/downloads, write site/update.xml, emit dist/
-npm start         # build, then serve dist/ on 0.0.0.0:$PORT (default 4173)
+npm run preview   # build, then serve dist/ on 0.0.0.0:$PORT (default 4173)
 npm run icons     # force-regenerate extension/icons
+npm run assets    # redraw the store art: promo tile, marquee, screenshots
 npm run check     # syntax-check the build tooling
 npm run validate  # static extension checks (manifest, icons, DNR rules, selectors)
 npm test          # jsdom checks: the content script, then the install page
                   # (needs `npm i --no-save jsdom`)
 ```
 
-The preview server is started and managed by Freebuff
-(`freebuff-preview start`), never by hand.
+## Hosting
 
-## Installing it
+`dist/` is the whole deployment: a static directory, no server, no build-time
+secrets. `scripts/build.mjs` stamps the public origin into `site/update.xml`
+and into the download links, so it has to match where the site is actually
+served; `SITE_ORIGIN` overrides the default.
 
-Chromium will not install an unsigned extension from a link, so:
-
-1. Download and extract the zip.
-2. Open `chrome://extensions` (or `edge://extensions`, `brave://extensions`).
-3. Enable **Developer mode** → **Load unpacked** → pick the extracted
-   `freebuff-adblock` folder.
-4. Reload any freebuff.com tabs that were already open.
-
-## The install page's store button
-
-The hero button is filled in at runtime, not hard-coded. `site/app.js` asks the
-browser to name itself first (`userAgentData.brands`), which every Blink browser
-answers — so a fork nobody has heard of still gets its own label — and falls back
-to user-agent matching for Firefox and Safari, which implement no such API.
-Either way the button ends up reading *Add to Chrome*, *Add to Coc Coc*, *Add to
-Firefox* for the reader in front of it, pointing at the store that serves them.
-Paste listing URLs into `STORE_LINKS`; any store left empty simply gets no button,
-so the page can never offer a dead link.
-
-Every Chromium browser installs from the Chrome Web Store, so an unrecognised
-browser falls through to that rather than to nothing: a wrong guess costs a
-label, never an install. Safari is the one deliberate dead end — it needs a
-native wrapper and a paid Apple account, so it is detected and given no button
-rather than one that leads nowhere. `npm run validate` fails if a browser in the
-table points at a store that has no link, or if Safari's matcher stops being the
-narrow one.
+`extension/popup.js` (`INSTALL_URL`) points at the same origin, and
+`npm run validate` fails if the two drift apart, because a mismatch is a dead
+link in the popup and a dead `codebase` in the feed rather than anything visible
+here.
 
 ## Auto-updates
 
@@ -185,18 +214,6 @@ Before the feed goes live, replace `YOUR_EXTENSION_ID_HERE` with the packed
 extension's real ID and point `codebase` at a signed CRX. The install page
 explains both routes to the user rather than implying unpacked extensions
 update themselves.
-
-## Deploying
-
-Set `SITE_ORIGIN` (in `scripts/build.mjs`, or as an environment variable) to the
-public origin so `update.xml` and the download link are absolute and correct.
-It defaults to `https://freebuff-adblocker.vercel.app`.
-
-`extension/popup.js` (`INSTALL_URL`) points at the same origin; `npm run
-validate` fails if the two drift apart, because a mismatch is a dead link in the
-popup and a dead `codebase` in the feed rather than anything visible here.
-
-`VERCEL_TOKEN` is read from the workspace environment; nothing else is required.
 
 ## Scope
 

@@ -25,20 +25,40 @@ gates the first submission.
 - [x] Extension icon, 128×128 — `extension/icons/icon128.png`
 - [x] Flat package with `manifest.json` at the root — `freebuff-adblock-1.3.0-store.zip`
 - [x] Firefox package with the event-page background — `freebuff-adblock-1.3.0-firefox.zip`
-- [ ] **MISSING** — 3 to 5 screenshots at **1280×800** (640×400 also accepted)
-- [ ] **MISSING** — small promo tile at **440×280** (required by Chrome and Edge)
-- [ ] **MISSING** — a privacy policy **URL** (Edge requires one; Chrome asks less formally)
+- [x] Small promo tile at **440×280** — `site/store-assets/promo-440x280.png`
+- [x] Marquee at **1400×560** (Chrome only, optional) — `site/store-assets/marquee-1400x560.png`
+- [x] Four screenshots at **1280×800** — `site/store-assets/screenshot-*.png`
+- [x] A privacy policy **URL** — <https://freebuff-adblocker.vercel.app/privacy>
+- [ ] Publisher **contact email** — `workofma@gmail.com`, entered *and* verified in
+      the store's own **Settings** page. Unverified, neither store will publish.
 
-### Screenshot shot list
+### Screenshots
 
-1280×800, no browser chrome, dark theme to match the extension. Cropping to
-exactly this size matters — both stores reject off-size images.
+`npm run assets` draws four, each exactly **1280×800**, 24-bit RGB, no alpha —
+the size and colour type both stores accept, with no transparency to reject.
 
-1. The popup open on freebuff.com, counter showing elements hidden.
-2. freebuff.com chat with the in-product promo card gone, chat intact.
-3. The same page with the extension toggled **off**, showing the ads it removes.
-4. The element picker mid-click, with its bar visible.
-5. The install page hero (optional — good for a "how you get it" frame).
+| File | Shows |
+| --- | --- |
+| `screenshot-1-chat-1280x800.png` | the chat mid-build with its slots cleared, beside the three tiers |
+| `screenshot-2-popup-1280x800.png` | the popup, annotated: the switch, the live count, the picker |
+| `screenshot-3-layers-1280x800.png` | why there are three detection tiers and not one |
+| `screenshot-4-scope-1280x800.png` | the one host it asks for, and what it never reads |
+
+These are **composed artwork**, drawn from the extension's own interface rather
+than captured from a running browser — the build environment has no browser to
+capture in. Every claim in them is true of the product (the slots, the switch,
+the counter and the picker all exist), but they are illustrations, so say so if
+a reviewer asks.
+
+To add a real capture instead, and it is the stronger submission if you have
+five minutes:
+
+1. Load the unpacked extension and open freebuff.com with an ad showing.
+2. `Ctrl+Shift+M` for the device toolbar, then set the size to **1280×800**.
+3. `Ctrl+Shift+P` → **Capture screenshot**. That writes page content only, as a
+   24-bit PNG with no alpha — exactly what both stores want.
+4. Upload it as a fifth screenshot; keep the composed ones for the frames a
+   screenshot cannot show (the layers, the scope).
 
 ---
 
@@ -73,6 +93,13 @@ exactly this size matters — both stores reject off-size images.
 8. Note the **extension ID** once it is live — `chrome://extensions` → Details.
    That is what `update.xml` needs if you ever self-host.
 
+**Watch out for:** the dashboard refuses to publish anything until the
+**publisher contact email** is set *and verified* on the **Settings** page.
+Enter `workofma@gmail.com`, click **Verify**, and open the message it sends -
+it lands in spam more often than not. An unverified address is the usual cause
+of *"You must verify the publisher's contact email"*, just as an unpushed
+privacy page is the usual cause of *"Privacy policy link is not reachable"*.
+
 **Watch out for:** a new publisher account is capped at **two published
 extensions**. Your current limit is shown in the dashboard, and there is a
 **request an increase** button when you hit it. Decisions are immediate or take
@@ -101,7 +128,7 @@ Free, but a separate account from Chrome. Same zip — no changes needed.
    - justify every permission
    - declare whether you use remote code (**no**)
    - certify data usage (**collects nothing**)
-   - **set a privacy policy URL** — see the missing asset above
+   - **set a privacy policy URL** — <https://freebuff-adblocker.vercel.app/privacy>
 7. **Store listing** — per language: description, screenshots, promo tile.
 8. **Testing notes** — free text for the reviewer. Use one line: *no account
    needed; open freebuff.com and ads in the chat are hidden.*
