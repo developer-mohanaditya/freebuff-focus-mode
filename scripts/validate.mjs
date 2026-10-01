@@ -573,6 +573,119 @@ function checkStoreButtons() {
   }
 }
 
+/* ----------------------------------------------------------------- privacy */
+
+/**
+ * Edge cannot be published without a privacy policy URL, and both stores read
+ * the page as the extension's data declaration. So it has to exist, it has to
+ * still say the things the extension actually does - a policy that quietly
+ * stops mentioning remote code is a policy that no longer matches the package -
+ * and it has to be reachable from the install page.
+ */
+function checkPrivacy() {
+  console.log('\nprivacy policy');
+
+  const file = path.join(ROOT, 'site', 'privacy.html');
+  if (!fs.existsSync(file)) {
+    fail('site/privacy.html is missing - the Edge listing has no privacy policy URL');
+    return;
+  }
+  pass('site/privacy.html exists');
+
+  const html = fs.readFileSync(file, 'utf8');
+  const index = fs.readFileSync(path.join(ROOT, 'site', 'index.html'), 'utf8');
+
+  // The prose is wrapped, so a phrase can straddle a newline and its indent.
+  // Flatten runs of whitespace before matching, or the check fails on nothing
+  // but a reflow.
+  const prose = html.replace(/\s+/g, ' ').toLowerCase();
+
+  // Each of these is a claim a store checks the extension against.
+  const claims = [
+    ['collects nothing', 'the no-collection statement'],
+    ['declarativenetrequest', 'the network permission'],
+    ['storage', 'the storage permission'],
+    ['freebuff.com', 'the single host it touches'],
+    ['remote code', 'the no-remote-code declaration'],
+    ['third parties', 'the no-third-parties statement'],
+  ];
+
+  for (const [needle, why] of claims) {
+    prose.includes(needle)
+      ? pass(`policy covers ${why}`)
+      : fail(`privacy.html no longer covers ${why}`);
+  }
+
+  index.includes('href="privacy.html"')
+    ? pass('the install page links the policy in its footer')
+    : fail('index.html no longer links privacy.html - reviewers reach the policy from there');
+
+  // The footer link is relative, like every other link on the site. The URL a
+  // store is given is the clean one (`cleanUrls`), so the preview server has to
+  // resolve that too, or the address handed to a reviewer 404s wherever the
+  // page is actually checked before release.
+  const serve = fs.readFileSync(path.join(ROOT, 'scripts', 'serve.mjs'), 'utf8');
+  serve.includes('`${target}.html`')
+    ? pass('the preview resolves the extensionless URL production serves')
+    : fail('serve.mjs no longer maps /privacy to privacy.html - that URL would 404 in the preview');
+}
+
+/* ------------------------------------------------------------ store assets */
+
+/**
+ * The listing art `npm run assets` writes. The stores reject a screenshot that
+ * is not 1280x800 (640x400 also works) or a tile that is not 440x280, and they
+ * reject alpha outright - so the size and the PNG colour type are the two
+ * properties worth failing on, since neither is visible until a reviewer says
+ * no.
+ */
+const STORE_ASSETS = [
+  ['promo-440x280.png', 440, 280],
+  ['marquee-1400x560.png', 1400, 560],
+  ['screenshot-1-chat-1280x800.png', 1280, 800],
+  ['screenshot-2-popup-1280x800.png', 1280, 800],
+  ['screenshot-3-layers-1280x800.png', 1280, 800],
+  ['screenshot-4-scope-1280x800.png', 1280, 800],
+];
+
+function checkStoreAssets() {
+  const dir = path.join(ROOT, 'site', 'store-assets');
+  const bad = [];
+
+  for (const [fileName, width, height] of STORE_ASSETS) {
+    const file = path.join(dir, fileName);
+
+    if (!fs.existsSync(file)) {
+      bad.push(`site/store-assets/${fileName} is missing - run \`npm run assets\``);
+      continue;
+    }
+
+    const png = fs.readFileSync(file);
+
+    if (png.subarray(1, 4).toString('ascii') !== 'PNG') {
+      bad.push(`site/store-assets/${fileName} is not a PNG`);
+      continue;
+    }
+
+    const actualWidth = png.readUInt32BE(16);
+    const actualHeight = png.readUInt32BE(20);
+    const colourType = png[25];
+
+    if (actualWidth !== width || actualHeight !== height) {
+      bad.push(
+        `site/store-assets/${fileName} is ${actualWidth}x${actualHeight}, the stores want ${width}x${height}`
+      );
+    } else if (colourType !== 2) {
+      bad.push(
+        `site/store-assets/${fileName} has PNG colour type ${colourType} - the stores reject transparency (type 2) - and an opaque RGBA image still declares alpha`
+      );
+    }
+  }
+
+  if (bad.length) for (const problem of bad) fail(problem);
+  else pass(`${STORE_ASSETS.length} store assets are the right size, with no alpha channel`);
+}
+
 /* ------------------------------------------------------------------ package */
 
 function run() {
@@ -586,6 +699,8 @@ function run() {
   checkOrigin();
   checkPickerWiring();
   checkStoreButtons();
+  checkPrivacy();
+  checkStoreAssets();
 
   console.log('');
   if (problems.length) {

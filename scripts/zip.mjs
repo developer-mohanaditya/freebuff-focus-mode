@@ -28,14 +28,31 @@ function crc32(buf) {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-function dosDateTime(date = new Date()) {
-  const year = Math.min(2107, Math.max(1980, date.getFullYear()));
+/**
+ * The modification time stamped on every entry.
+ *
+ * Fixed, deliberately - not the wall clock. A ZIP stores a time per entry, so
+ * stamping `new Date()` makes two builds of identical sources produce different
+ * bytes: the package shipped to a store could never be checked against the
+ * commit it came from, and every `npm run build` dirtied the working tree. The
+ * default is the ZIP epoch, which is what reproducible-build tooling uses when
+ * there is no better answer. `SOURCE_DATE_EPOCH` overrides it.
+ */
+function entryDate() {
+  const epoch = Number(process.env.SOURCE_DATE_EPOCH);
+  if (Number.isFinite(epoch) && epoch > 0) return new Date(epoch * 1000);
+  return new Date(Date.UTC(1980, 0, 1, 0, 0, 0));
+}
+
+/** Read in UTC, so the archive does not vary with the machine's timezone. */
+function dosDateTime(date = entryDate()) {
+  const year = Math.min(2107, Math.max(1980, date.getUTCFullYear()));
   return {
     time:
-      (date.getHours() << 11) |
-      (date.getMinutes() << 5) |
-      Math.floor(date.getSeconds() / 2),
-    date: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate(),
+      (date.getUTCHours() << 11) |
+      (date.getUTCMinutes() << 5) |
+      Math.floor(date.getUTCSeconds() / 2),
+    date: ((year - 1980) << 9) | ((date.getUTCMonth() + 1) << 5) | date.getUTCDate(),
   };
 }
 
