@@ -35,27 +35,27 @@ can never be blocked. See `extension/rules.md` for the full reasoning.
 
 ## Browsers
 
-One manifest, three stores. Firefox has no Manifest V3 service worker, so
-`background` declares **both** keys — the worker Chromium runs and the event page
-Firefox falls back to. That is Mozilla's documented cross-browser pattern, and
-Chrome 121+ ignores `scripts` rather than refusing to load the extension.
-`browser_specific_settings.gecko.id` is required to sign an MV3 add-on on AMO;
-Chromium ignores the key. `strict_min_version` is 115, where `storage.session`
-became available.
+Firefox has no Manifest V3 service worker, so it needs `background.scripts` to
+run the same file as an event page — and that key is Manifest V2 as far as
+Chromium is concerned. Chrome 121+ ignores it rather than refusing to load, but
+it still shows up as a **warning on `chrome://extensions`**. So the source
+manifest stays Chromium-clean and `firefoxManifest()` in `scripts/build.mjs`
+derives the Firefox one, adding that key plus `browser_specific_settings.gecko.id`
+(required to sign an MV3 add-on on AMO, where Chromium-only keys are ignored).
+`strict_min_version` is 115, where `storage.session` became available.
 
 Everything else is shared: the same `declarativeNetRequest` ruleset, the same
-content script, the same popup. `npm run validate` fails when either background
-key is missing, so a browser cannot be dropped by accident.
+content script, the same popup. `npm run validate` fails if an MV2-only key
+creeps back into the source manifest, or if the derived Firefox manifest loses
+the event page or the gecko id.
 
-One build writes two packages:
+One build writes three packages:
 
 | File | For |
 | --- | --- |
-| `freebuff-adblock-<version>.zip` | load unpacked — one tidy top-level folder |
-| `freebuff-adblock-<version>-store.zip` | store upload — `manifest.json` at the archive root |
-
-All three stores (Chrome Web Store, Edge Add-ons, addons.mozilla.org) want the
-second one.
+| `freebuff-adblock-<version>.zip` | load unpacked in Chromium — one tidy top-level folder |
+| `freebuff-adblock-<version>-store.zip` | Chrome Web Store and Edge Add-ons — `manifest.json` at the archive root |
+| `freebuff-adblock-<version>-firefox.zip` | addons.mozilla.org — the same, plus the event-page background |
 
 ## The ad network, and what happens when it changes
 
@@ -114,6 +114,7 @@ scripts/            zero-dependency build tooling
   serve.mjs           preview server (builds first, binds 0.0.0.0)
   validate.mjs        static checks Chrome would otherwise only fail at load
   test-detection.mjs  jsdom checks: hides the ads, keeps the chat
+  test-site.mjs       jsdom checks: the install page's store button
   zip.mjs             minimal ZIP writer
   png.mjs             minimal PNG encoder + icon artwork
   gen-icons.mjs       force-regenerate icons
@@ -122,6 +123,7 @@ site/               install page source
   styles.css
   app.js              store-button detection; paste listing URLs into STORE_LINKS
 dist/               static output - served by the preview and by hosting
+PUBLISHING.md       step-by-step store submissions, plus the listing copy
 ```
 
 There are no npm dependencies. The production build image is Node-only and
@@ -136,7 +138,8 @@ npm start         # build, then serve dist/ on 0.0.0.0:$PORT (default 4173)
 npm run icons     # force-regenerate extension/icons
 npm run check     # syntax-check the build tooling
 npm run validate  # static extension checks (manifest, icons, DNR rules, selectors)
-npm test          # jsdom checks for the content script (needs `npm i --no-save jsdom`)
+npm test          # jsdom checks: the content script, then the install page
+                  # (needs `npm i --no-save jsdom`)
 ```
 
 The preview server is started and managed by Freebuff

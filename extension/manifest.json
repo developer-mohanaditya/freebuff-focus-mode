@@ -7,14 +7,7 @@
   "permissions": ["declarativeNetRequest", "storage"],
   "host_permissions": ["*://freebuff.com/*", "*://*.freebuff.com/*"],
   "background": {
-    "service_worker": "background.js",
-    "scripts": ["background.js"]
-  },
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "{7b3d9c4a-1e62-4f58-9c07-2ab5e8d41f93}",
-      "strict_min_version": "115.0"
-    }
+    "service_worker": "background.js"
   },
   "action": {
     "default_popup": "popup.html",
