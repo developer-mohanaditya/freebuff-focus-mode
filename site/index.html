@@ -227,14 +227,17 @@
           <div class="panel reveal">
             <h3>Firefox</h3>
             <p>
-              Firefox has no Manifest V3 service worker, so the package declares both background
-              keys — the worker Chromium runs, and the event page Firefox falls back to. Nothing
-              else changes: the same ruleset, the same content script, the same popup.
+              Firefox has no Manifest V3 service worker, so it runs the background as an event
+              page. That key is Manifest&nbsp;V2 as far as Chromium is concerned: ignored, but
+              reported as a warning on the extensions page. Rather than make every package carry
+              it, the build writes a Firefox variant with the key added. Everything else is
+              shared — the same ruleset, the same content script, the same popup.
             </p>
             <p>
-              To try it, open <code>about:debugging#/runtime/this-firefox</code>, choose
-              <strong>Load Temporary Add-on</strong>, and select <code>manifest.json</code> inside
-              the extracted folder. A temporary add-on lasts until Firefox restarts — a build
+              <a href="downloads/freebuff-adblock-1.3.0-firefox.zip" download>Download the Firefox
+              package</a>, then open <code>about:debugging#/runtime/this-firefox</code>, choose
+              <strong>Load Temporary Add-on</strong>, and select <code>manifest.json</code> from
+              the folder you extracted. A temporary add-on lasts until Firefox restarts — a build
               signed on addons.mozilla.org is the persistent route.
             </p>
           </div>
@@ -246,9 +249,9 @@
               It is also the only route that survives a restart without reloading anything by hand.
             </p>
             <p class="fine">
-              The package built for submission sits beside the download and carries
-              <code>manifest.json</code> at the archive root, which is what all three stores
-              require.
+              Two packages are built for submission, both with <code>manifest.json</code> at the
+              archive root, which is what the stores require: one for the Chrome Web Store and
+              Edge Add-ons, and one for addons.mozilla.org.
             </p>
             <p class="fine">
               Safari is the exception. It needs a separate build wrapped in a native app and a paid

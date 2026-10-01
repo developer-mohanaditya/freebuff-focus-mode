@@ -12,6 +12,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { firefoxManifest } from './build.mjs';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXT = path.join(ROOT, 'extension');
 
@@ -109,41 +111,48 @@ function checkManifest() {
     ? pass(`host access scoped: ${hosts.join(', ')}`)
     : fail(`host_permissions not scoped to freebuff.com: ${hosts.join(', ')}`);
 
-  // Cross-browser background. Firefox has no MV3 service worker and runs an
-  // event page instead, so the documented pattern is to declare both keys:
-  // browsers with service workers use that one, the rest fall back to scripts.
-  // Chrome 121+ ignores `scripts` rather than refusing to load the extension.
+  // Chromium reads the manifest on disk verbatim, so it has to stay clean.
+  // `background.scripts` is a Manifest V2 key: Chrome 121+ ignores it rather
+  // than refusing to load, but it is still reported as a warning on the
+  // extensions page. Firefox needs it and Chromium does not, so the build adds
+  // it to the Firefox package alone.
   const worker = manifest.background?.service_worker;
-  const scripts = manifest.background?.scripts;
 
   worker
     ? pass(`background service worker: ${worker}`)
-    : fail('background.service_worker is missing - Chrome would run no background');
+    : fail('background.service_worker is missing - no browser would run a background');
 
-  if (Array.isArray(scripts) && scripts.length) {
-    pass(`background scripts (Firefox event page): ${scripts.join(', ')}`);
-  } else {
-    fail('background.scripts is missing - Firefox would run no background at all');
-  }
+  manifest.background?.scripts
+    ? fail('background.scripts is in the source manifest - Chromium warns about that key')
+    : pass('source manifest is Chromium-clean (no MV2 background key)');
 
-  if (worker && Array.isArray(scripts) && scripts.includes(worker)) {
-    pass('both background keys run the same file');
-  } else {
-    fail('background.scripts must include background.service_worker');
-  }
+  manifest.browser_specific_settings
+    ? fail('browser_specific_settings belongs in the Firefox package, not the source manifest')
+    : pass('no Firefox-only keys in the source manifest');
 
-  const gecko = manifest.browser_specific_settings?.gecko;
+  // The Firefox manifest is derived at build time, so validate what it derives.
+  const firefox = firefoxManifest(manifest);
+  const eventPage = firefox.background?.scripts;
+
+  Array.isArray(eventPage) && eventPage.includes(worker)
+    ? pass(`Firefox package runs ${worker} as an event page`)
+    : fail('the Firefox manifest runs no event page - Firefox would have no background');
+
+  firefox.background?.service_worker === worker
+    ? pass('Firefox package keeps the service worker key as well')
+    : fail('the Firefox manifest dropped background.service_worker');
+
+  const gecko = firefox.browser_specific_settings?.gecko;
   gecko?.id
-    ? pass(`gecko id ${gecko.id}`)
-    : fail('browser_specific_settings.gecko.id is required to sign an MV3 add-on for Firefox');
+    ? pass(`Firefox package carries gecko id ${gecko.id}`)
+    : fail('the Firefox manifest has no gecko id - AMO cannot sign it');
   gecko?.strict_min_version
-    ? pass(`gecko strict_min_version ${gecko.strict_min_version}`)
-    : fail('browser_specific_settings.gecko.strict_min_version is not set');
+    ? pass(`Firefox package sets strict_min_version ${gecko.strict_min_version}`)
+    : fail('the Firefox manifest has no strict_min_version');
 
   // Every file the manifest points at must exist.
   const referenced = [];
   if (worker) referenced.push(worker);
-  for (const file of scripts || []) referenced.push(file);
   if (manifest.action?.default_popup) referenced.push(manifest.action.default_popup);
 
   for (const [size, file] of Object.entries(manifest.icons || {})) referenced.push(file);

@@ -35,6 +35,32 @@ const ZIP_ROOT_FOLDER = 'freebuff-adblock';
 /** Chrome rejects this feed until the real ID and a signed CRX exist. */
 const PLACEHOLDER_APP_ID = 'YOUR_EXTENSION_ID_HERE';
 
+/**
+ * What Firefox needs and Chromium does not.
+ *
+ * Firefox has no Manifest V3 service worker, so it runs the same file as an
+ * event page through `background.scripts`. Chromium reads that key as Manifest
+ * V2: harmless since Chrome 121, which ignores it - but it is still reported as
+ * a warning on the extensions page. So the source manifest stays Chromium-clean
+ * and this is added to the Firefox package only.
+ *
+ * The id is required to sign an MV3 add-on on AMO. A GUID is used rather than an
+ * address, so it cannot collide with - or be squatted on - a real domain.
+ */
+const GECKO = {
+  id: '{7b3d9c4a-1e62-4f58-9c07-2ab5e8d41f93}',
+  strict_min_version: '115.0',
+};
+
+/** The same extension, declared the way Firefox has to have it. */
+export function firefoxManifest(manifest) {
+  const firefox = structuredClone(manifest);
+  const worker = manifest.background.service_worker;
+  firefox.background = { service_worker: worker, scripts: [worker] };
+  firefox.browser_specific_settings = { gecko: { ...GECKO } };
+  return firefox;
+}
+
 function log(...parts) {
   console.log('[build]', ...parts);
 }
@@ -57,7 +83,7 @@ function formatBytes(bytes) {
 
 /* ------------------------------------------------------------- package the zip */
 
-function packageAll(version) {
+function packageAll(version, manifest) {
   fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
 
   const files = walk(EXT_DIR).sort();
@@ -65,15 +91,18 @@ function packageAll(version) {
     throw new Error('extension/manifest.json not found - nothing to package');
   }
 
-  const pack = (root, suffix) => {
+  const pack = (root, suffix, override) => {
     const entries = files.map((relative) => {
       const name = relative.split(path.sep).join('/');
+      const swapped = name === 'manifest.json' && override;
       return {
         // A single top-level folder keeps a hand-extracted result tidy. Store
         // submissions are the other way round: the Chrome Web Store, Edge
         // Add-ons and AMO all want manifest.json at the root of the archive.
         name: root ? `${root}/${name}` : name,
-        data: fs.readFileSync(path.join(EXT_DIR, relative)),
+        data: swapped
+          ? Buffer.from(`${JSON.stringify(override, null, 2)}\n`)
+          : fs.readFileSync(path.join(EXT_DIR, relative)),
       };
     });
 
@@ -92,10 +121,11 @@ function packageAll(version) {
 
   const unpacked = pack(ZIP_ROOT_FOLDER, '');
   const store = pack(null, '-store');
+  const firefox = pack(null, '-firefox', firefoxManifest(manifest));
 
-  // Remove stale packages so downloads/ never accumulates old versions. Both
-  // current variants are kept - neither is a leftover of the other.
-  const keep = new Set([unpacked.fileName, store.fileName]);
+  // Remove stale packages so downloads/ never accumulates old versions. Every
+  // current variant is kept - none is a leftover of another.
+  const keep = new Set([unpacked.fileName, store.fileName, firefox.fileName]);
   for (const existing of fs.readdirSync(DOWNLOADS_DIR)) {
     if (existing.endsWith('.zip') && !keep.has(existing)) {
       fs.unlinkSync(path.join(DOWNLOADS_DIR, existing));
@@ -103,7 +133,7 @@ function packageAll(version) {
     }
   }
 
-  return { unpacked, store };
+  return { unpacked, store, firefox };
 }
 
 /* ---------------------------------------------------------------- update feed */
@@ -143,29 +173,36 @@ function writeUpdateXml(version, packageInfo) {
  * Substitutions are regexes over already-substituted values, so rebuilding
  * never drifts: run it twice and the output is identical.
  */
-function writeDist(version, packageInfo, storeInfo) {
+function writeDist(version, packageInfo, storeInfo, firefoxInfo) {
   fs.rmSync(DIST_DIR, { recursive: true, force: true });
   fs.mkdirSync(DIST_DIR, { recursive: true });
 
   fs.cpSync(SITE_DIR, DIST_DIR, { recursive: true });
 
+  // The version-suffixed filenames are rewritten to whatever this build just
+  // produced, so the page can never point at a package that is not there. The
+  // Firefox pattern is checked separately: `[\d.]+\.zip` cannot match
+  // `-firefox.zip`, because the character after the version is a dash.
+  const stamp = (source) =>
+    source
+      .replace(
+        /href="downloads\/freebuff-adblock-[\d.]+\.zip"/g,
+        `href="${packageInfo.relativePath}"`
+      )
+      .replace(
+        /href="downloads\/freebuff-adblock-[\d.]+-firefox\.zip"/g,
+        `href="${firefoxInfo.relativePath}"`
+      )
+      .replace(/(<span data-version>)[^<]*(<\/span>)/g, `$1${version}$2`)
+      .replace(/(<code data-download-path>)[^<]*(<\/code>)/g, `$1/${packageInfo.relativePath}$2`);
+
   const indexPath = path.join(DIST_DIR, 'index.html');
-  let html = fs.readFileSync(indexPath, 'utf8');
-
-  html = html
-    .replace(/href="downloads\/freebuff-adblock-[\d.]+\.zip"/g, `href="${packageInfo.relativePath}"`)
-    .replace(/(<span data-version>)[^<]*(<\/span>)/g, `$1${version}$2`)
-    .replace(/(<code data-download-path>)[^<]*(<\/code>)/g, `$1/${packageInfo.relativePath}$2`);
-
-  fs.writeFileSync(indexPath, html);
+  fs.writeFileSync(indexPath, stamp(fs.readFileSync(indexPath, 'utf8')));
 
   // Keep the source copy in sync too, so site/ is always directly serveable.
   const sourceIndex = path.join(SITE_DIR, 'index.html');
-  let sourceHtml = fs.readFileSync(sourceIndex, 'utf8');
-  const stampedSource = sourceHtml
-    .replace(/href="downloads\/freebuff-adblock-[\d.]+\.zip"/g, `href="${packageInfo.relativePath}"`)
-    .replace(/(<span data-version>)[^<]*(<\/span>)/g, `$1${version}$2`)
-    .replace(/(<code data-download-path>)[^<]*(<\/code>)/g, `$1/${packageInfo.relativePath}$2`);
+  const sourceHtml = fs.readFileSync(sourceIndex, 'utf8');
+  const stampedSource = stamp(sourceHtml);
 
   if (stampedSource !== sourceHtml) {
     fs.writeFileSync(sourceIndex, stampedSource);
@@ -183,6 +220,7 @@ function writeDist(version, packageInfo, storeInfo) {
         version,
         zip: packageInfo.relativePath,
         store: storeInfo ? storeInfo.relativePath : null,
+        firefox: firefoxInfo ? firefoxInfo.relativePath : null,
         origin: SITE_ORIGIN,
       },
       null,
@@ -202,17 +240,18 @@ export function build() {
   const manifest = readManifest();
   const version = manifest.version;
 
-  const { unpacked, store } = packageAll(version);
+  const { unpacked, store, firefox } = packageAll(version, manifest);
   writeUpdateXml(version, unpacked);
-  writeDist(version, unpacked, store);
+  writeDist(version, unpacked, store, firefox);
 
   log(`v${version} - ${unpacked.fileCount} files, ${formatBytes(unpacked.bytes)}`);
-  log(`package  site/${unpacked.relativePath}   (load unpacked)`);
-  log(`package  site/${store.relativePath}   (store submission)`);
+  log(`package  site/${unpacked.relativePath}   (load unpacked, Chromium)`);
+  log(`package  site/${store.relativePath}   (Chrome Web Store, Edge Add-ons)`);
+  log(`package  site/${firefox.relativePath}   (addons.mozilla.org)`);
   log('feed     site/update.xml');
   log(`output   dist/  (${Date.now() - started}ms)`);
 
-  return { version, unpacked, store };
+  return { version, unpacked, store, firefox };
 }
 
 const invokedDirectly =
