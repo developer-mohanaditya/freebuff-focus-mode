@@ -141,8 +141,10 @@ package and pre-fill the listing. Ours are already written to read well.
 
 ## 3. Firefox (addons.mozilla.org)
 
-Free. **This one uses the other zip** — `-firefox.zip`, which has
-`background.scripts` and the gecko id the Chromium build deliberately omits.
+Free. **This one uses the other zip** — `-firefox.zip`, which carries the gecko
+id, the AMO data-collection declaration and a `background.scripts` event page,
+and drops `background.service_worker` outright. All four are things the Chromium
+package must not have, and the source `extension/manifest.json` stays clean.
 
 1. Create a Firefox Account, then open
    <https://addons.mozilla.org/developers/> and register as a developer.
@@ -154,7 +156,14 @@ Free. **This one uses the other zip** — `-firefox.zip`, which has
    | **Unlisted / self-distribution** | AMO signs it, no public page. You host the signed `.xpi` |
 
 3. Upload `freebuff-adblock-1.3.0-firefox.zip` (rename to `.xpi` if you prefer —
-   the bytes are identical).
+   the bytes are identical). It should validate as **0 errors, 0 warnings, 0
+   notices** across all five categories. To see that report before uploading,
+   run the same linter AMO runs — no dependency is added to the project, this
+   fetches it on the spot:
+
+   ```
+   npx --yes addons-linter@10.13.0 site/downloads/freebuff-adblock-1.3.0-firefox.zip
+   ```
 4. Both channels go through **manual review**. Unlisted is usually signed
    quickly, but it is not automatic and can queue behind a queue. Do not plan
    around it being instant.
@@ -173,6 +182,15 @@ Free. **This one uses the other zip** — `-firefox.zip`, which has
 `{7b3d9c4a-1e62-4f58-9c07-2ab5e8d41f93}`. It is effectively permanent — changing
 it later makes the add-on a **different** add-on and breaks updates for anyone
 who installed it.
+
+**Watch out for:** `browser_specific_settings.gecko.data_collection_permissions`
+is `{ "required": ["none"] }` — this extension has no server and transmits
+nothing. AMO requires the key from every new submission and
+blocks one that omits it, so it must survive every future rebuild, and the
+declared value has to stay true. Once a version ships it, later versions have to
+keep it. `strict_min_version` is `142.0`: AMO's validator checks the declared
+minimum against the Firefox for Android floor for that key as well, so anything
+lower reports a warning even though this package is desktop-only.
 
 For scripted signing instead of the web upload, add these in
 Settings → Environment and hand them over:
