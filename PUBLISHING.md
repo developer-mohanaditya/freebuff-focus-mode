@@ -178,6 +178,11 @@ package must not have, and the source `extension/manifest.json` stays clean.
    everything under `/downloads/*`, which fights the install prompt. A
    self-hosted XPI needs its own header rule.
 
+**License:** the form asks which licence you grant. Answer **MIT License** —
+that is what `LICENSE` in this repository says, and the two have to agree. The
+source is public, so picking anything more restrictive here would contradict the
+repo.
+
 **Watch out for:** the gecko id in the Firefox manifest is
 `{7b3d9c4a-1e62-4f58-9c07-2ab5e8d41f93}`. It is effectively permanent — changing
 it later makes the add-on a **different** add-on and breaks updates for anyone
