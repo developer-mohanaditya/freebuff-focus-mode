@@ -138,9 +138,17 @@ function checkManifest() {
     ? pass(`Firefox package runs ${worker} as an event page`)
     : fail('the Firefox manifest runs no event page - Firefox would have no background');
 
-  firefox.background?.service_worker === worker
-    ? pass('Firefox package keeps the service worker key as well')
-    : fail('the Firefox manifest dropped background.service_worker');
+  // Firefox ignores this key, and AMO's validator says so out loud. Leaving it
+  // in beside the event page - which is what this build used to do - is the
+  // "unsupported ... and ignored on Firefox" warning in the validation report.
+  firefox.background?.service_worker === undefined
+    ? pass('Firefox package leaves background.service_worker out')
+    : fail('the Firefox manifest still declares background.service_worker - AMO warns about it');
+
+  const backgroundKeys = Object.keys(firefox.background || {}).join(', ');
+  backgroundKeys === 'scripts'
+    ? pass('Firefox background is the event page and nothing else')
+    : fail(`the Firefox background carries more than scripts: ${backgroundKeys || 'nothing'}`);
 
   const gecko = firefox.browser_specific_settings?.gecko;
   gecko?.id
@@ -149,6 +157,28 @@ function checkManifest() {
   gecko?.strict_min_version
     ? pass(`Firefox package sets strict_min_version ${gecko.strict_min_version}`)
     : fail('the Firefox manifest has no strict_min_version');
+
+  // AMO refuses a new submission that does not declare what it collects, and
+  // this extension collects nothing. `required: ["none"]` is the whole
+  // declaration: `optional` has no `none`, and an empty array is invalid.
+  const declared = gecko?.data_collection_permissions;
+  JSON.stringify(declared?.required) === '["none"]'
+    ? pass('Firefox package declares required data collection: none')
+    : fail('data_collection_permissions.required is not ["none"] - AMO blocks the submission');
+
+  declared?.optional
+    ? fail('the Firefox manifest declares optional data collection, but nothing here collects anything')
+    : pass('no optional data collection declared');
+
+  // 140 is where desktop Firefox learned the key, but AMO's validator also
+  // holds the declared minimum against the Android floor of 142 - even though
+  // this package declares no gecko_android and never ships there. Below 142 the
+  // validation report carries a warning on every submission, so 142 is the
+  // floor this package has to keep.
+  const floor = Number(gecko?.strict_min_version);
+  Number.isFinite(floor) && floor >= 142
+    ? pass(`Firefox floor ${gecko.strict_min_version} reports clean for the data declaration`)
+    : fail(`strict_min_version ${gecko?.strict_min_version} is below 142.0 - AMO warns that data_collection_permissions is unsupported there`);
 
   // Every file the manifest points at must exist.
   const referenced = [];

@@ -44,20 +44,41 @@ const PLACEHOLDER_APP_ID = 'YOUR_EXTENSION_ID_HERE';
  * a warning on the extensions page. So the source manifest stays Chromium-clean
  * and this is added to the Firefox package only.
  *
+ * The Firefox background is `scripts` *alone*. Keeping `service_worker` beside
+ * it is what AMO's validator warns about - "unsupported ... and ignored on
+ * Firefox" - and dropping the key is the fix, not pairing it with a fallback.
+ * Firefox cannot use a service worker at all, so there is nothing to lose.
+ *
  * The id is required to sign an MV3 add-on on AMO. A GUID is used rather than an
  * address, so it cannot collide with - or be squatted on - a real domain.
  */
 const GECKO = {
   id: '{7b3d9c4a-1e62-4f58-9c07-2ab5e8d41f93}',
-  strict_min_version: '115.0',
+  // 142, and it is a floor taken from the validator rather than from a feature
+  // this extension uses. `data_collection_permissions` below arrived in desktop
+  // Firefox 140 and Firefox for Android 142, and AMO's validator checks the
+  // declared minimum against *both* even for an add-on that never ships on
+  // Android - it reads the Android floor straight off this desktop value. Claim
+  // 140 and every submission carries a permanent
+  // KEY_FIREFOX_ANDROID_UNSUPPORTED_BY_MIN_VERSION warning for a platform this
+  // build does not target (no `gecko_android` key). 142 is the smallest value
+  // that reports clean, and both 140 and 142 are long superseded.
+  strict_min_version: '142.0',
+  // AMO blocks the submission of any new extension that does not say whether it
+  // collects data. This one has no server and transmits nothing, and `none` is
+  // the only way to say exactly that. It is valid in `required` only - the
+  // `optional` list has no such value - and once a version ships the key, every
+  // later version has to keep it.
+  // https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent/
+  data_collection_permissions: { required: ['none'] },
 };
 
 /** The same extension, declared the way Firefox has to have it. */
 export function firefoxManifest(manifest) {
   const firefox = structuredClone(manifest);
   const worker = manifest.background.service_worker;
-  firefox.background = { service_worker: worker, scripts: [worker] };
-  firefox.browser_specific_settings = { gecko: { ...GECKO } };
+  firefox.background = { scripts: [worker] };
+  firefox.browser_specific_settings = { gecko: structuredClone(GECKO) };
   return firefox;
 }
 

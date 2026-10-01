@@ -74,14 +74,26 @@ run the same file as an event page — and that key is Manifest V2 as far as
 Chromium is concerned. Chrome 121+ ignores it rather than refusing to load, but
 it still shows up as a **warning on `chrome://extensions`**. So the source
 manifest stays Chromium-clean and `firefoxManifest()` in `scripts/build.mjs`
-derives the Firefox one, adding that key plus `browser_specific_settings.gecko.id`
-(required to sign an MV3 add-on on AMO, where Chromium-only keys are ignored).
-`strict_min_version` is 115, where `storage.session` became available.
+derives the Firefox one. Three differences, and each one is something AMO
+complains about when it is missing or wrong:
+
+| Key | Value in the Firefox package | Why |
+| --- | --- | --- |
+| `background` | `scripts` **only**, no `service_worker` | Firefox ignores that key and its validator says so in the report |
+| `browser_specific_settings.gecko.id` | the add-on GUID | required to sign an MV3 add-on; Chromium-only keys are ignored |
+| `…gecko.data_collection_permissions` | `{ "required": ["none"] }` | AMO blocks any new submission that does not declare what it collects, and nothing here collects anything |
+
+`strict_min_version` is `142.0`. Desktop Firefox learned the data collection key
+in 140, but AMO's validator holds the declared minimum against the Firefox for
+Android floor of 142 too — even for a package that declares no Android support,
+which this one does not — so anything lower leaves a warning in every validation
+report.
 
 Everything else is shared: the same `declarativeNetRequest` ruleset, the same
 content script, the same popup. `npm run validate` fails if an MV2-only key
 creeps back into the source manifest, or if the derived Firefox manifest loses
-the event page or the gecko id.
+the event page, the gecko id or the `none` declaration — or picks the service
+worker key back up.
 
 One build writes three packages:
 
