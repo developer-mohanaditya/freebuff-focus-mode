@@ -9,8 +9,9 @@
     "preview": "node scripts/build.mjs && node scripts/serve.mjs",
     "start": "node scripts/serve.mjs",
     "icons": "node scripts/gen-icons.mjs",
+    "assets": "node scripts/store-assets.mjs",
     "validate": "node scripts/validate.mjs",
     "test": "node scripts/test-detection.mjs && node scripts/test-site.mjs",
-    "check": "node --check scripts/build.mjs && node --check scripts/serve.mjs && node --check scripts/zip.mjs && node --check scripts/png.mjs && node --check scripts/validate.mjs"
+    "check": "node --check scripts/build.mjs && node --check scripts/serve.mjs && node --check scripts/zip.mjs && node --check scripts/png.mjs && node --check scripts/store-assets.mjs && node --check scripts/validate.mjs"
   }
 }

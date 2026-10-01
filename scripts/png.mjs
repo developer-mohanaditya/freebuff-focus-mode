@@ -73,6 +73,41 @@ export function encodePng(size, rgba) {
   ]);
 }
 
+/**
+ * Encode an opaque RGB buffer (width * height * 3) as a 24-bit PNG.
+ *
+ * Colour type 2, no alpha channel at all: the Chrome Web Store and Edge both
+ * reject translucency in screenshots and promo tiles, and a PNG that merely
+ * happens to be fully opaque still carries an alpha channel unless it is
+ * written this way.
+ */
+export function encodePngRgb(width, height, rgb) {
+  const stride = width * 3;
+  const raw = Buffer.alloc(height * (1 + stride));
+
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * (1 + stride);
+    raw[rowStart] = 0; // filter: none
+    Buffer.from(rgb.buffer, rgb.byteOffset + y * stride, stride).copy(raw, rowStart + 1);
+  }
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // colour type: truecolour RGB
+  ihdr[10] = 0; // compression
+  ihdr[11] = 0; // filter
+  ihdr[12] = 0; // interlace
+
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(raw, { level: 9 })),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
 /* ------------------------------------------------------------------ paint */
 
 const SUPER = 8;
