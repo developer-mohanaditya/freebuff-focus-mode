@@ -660,7 +660,7 @@ function checkVersionLabels(manifest) {
 
     const missing = [];
     if (!/v<span data-version>/.test(pill)) missing.push('the navbar tag is not a version stamp');
-    if (!footer.includes('Freebuff Ad Block · v<span data-version>'))
+    if (!footer.includes('Freebuff Focus Mode · v<span data-version>'))
       missing.push('the footer does not carry the version stamp');
 
     if (missing.length) {

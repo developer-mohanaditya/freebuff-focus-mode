@@ -1,6 +1,6 @@
 /* --------------------------------------------------------------------------
    Freebuff Ad Block - install page
-   Dark, high-contrast, coral accent. No framework, no build step for CSS.
+   Dark, high-contrast, calm sage accent. No framework, no build step for CSS.
    -------------------------------------------------------------------------- */
 
 :root {
@@ -15,9 +15,9 @@
   --muted: #96a0b5;
   --muted-2: #6f7891;
 
-  --accent: #ff5a45;
-  --accent-2: #ffb020;
-  --accent-soft: rgba(255, 90, 69, 0.12);
+  --accent: #9DB89A;
+  --accent-2: #E8B34B;
+  --accent-soft: rgba(157, 184, 154, 0.12);
   --ok: #38d39f;
 
   --radius: 14px;
@@ -60,8 +60,8 @@ body {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(760px 420px at 12% -6%, rgba(255, 90, 69, 0.16), transparent 70%),
-    radial-gradient(620px 380px at 88% 4%, rgba(255, 176, 32, 0.09), transparent 70%),
+    radial-gradient(760px 420px at 12% -6%, rgba(157, 184, 154, 0.16), transparent 70%),
+    radial-gradient(620px 380px at 88% 4%, rgba(232, 179, 75, 0.09), transparent 70%),
     linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px) 0 0 / 100% 64px,
     linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px) 0 0 / 64px 100%;
   mask-image: linear-gradient(to bottom, #000 0, #000 62%, transparent 100%);
@@ -129,12 +129,12 @@ strong {
   height: 30px;
   border-radius: 9px;
   background: var(--accent-soft);
-  border: 1px solid rgba(255, 90, 69, 0.28);
+  border: 1px solid rgba(157, 184, 154, 0.28);
   color: var(--accent);
 }
 
 .brand:hover .brand-mark {
-  background: rgba(255, 90, 69, 0.2);
+  background: rgba(157, 184, 154, 0.2);
 }
 
 .pill {
@@ -209,12 +209,12 @@ strong {
 .btn-primary {
   background: var(--accent);
   color: #1a0603;
-  box-shadow: 0 10px 30px -12px rgba(255, 90, 69, 0.75);
+  box-shadow: 0 10px 30px -12px rgba(157, 184, 154, 0.75);
 }
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 16px 38px -12px rgba(255, 90, 69, 0.85);
+  box-shadow: 0 16px 38px -12px rgba(157, 184, 154, 0.85);
 }
 
 .btn-primary:active {
@@ -318,7 +318,7 @@ strong {
 }
 
 .card:hover {
-  border-color: rgba(255, 90, 69, 0.34);
+  border-color: rgba(157, 184, 154, 0.34);
   background: var(--surface-2);
   transform: translateY(-3px);
 }
@@ -355,8 +355,8 @@ strong {
   grid-template-columns: 1.35fr 1fr;
   gap: 40px;
   align-items: center;
-  background: linear-gradient(140deg, rgba(255, 90, 69, 0.09), rgba(255, 176, 32, 0.04));
-  border: 1px solid rgba(255, 90, 69, 0.24);
+  background: linear-gradient(140deg, rgba(157, 184, 154, 0.09), rgba(232, 179, 75, 0.04));
+  border: 1px solid rgba(157, 184, 154, 0.24);
   border-radius: var(--radius-lg);
   padding: 40px;
 }
@@ -418,7 +418,7 @@ strong {
 .rule-action.block {
   background: var(--accent-soft);
   color: var(--accent);
-  border: 1px solid rgba(255, 90, 69, 0.35);
+  border: 1px solid rgba(157, 184, 154, 0.35);
 }
 
 .rule-dom {
@@ -506,7 +506,7 @@ strong {
 }
 
 .copy:hover {
-  border-color: rgba(255, 90, 69, 0.5);
+  border-color: rgba(157, 184, 154, 0.5);
   color: var(--accent);
 }
 
@@ -519,7 +519,7 @@ strong {
    button says which key to press, so this state is informative, not an error. */
 .copy[data-state="warn"] {
   color: var(--accent);
-  border-color: rgba(255, 90, 69, 0.5);
+  border-color: rgba(157, 184, 154, 0.5);
 }
 
 /* ----------------------------------------------------------------- panels */
@@ -538,8 +538,8 @@ strong {
 }
 
 .panel-warn {
-  border-color: rgba(255, 176, 32, 0.3);
-  background: linear-gradient(160deg, rgba(255, 176, 32, 0.07), transparent 70%);
+  border-color: rgba(232, 179, 75, 0.3);
+  background: linear-gradient(160deg, rgba(232, 179, 75, 0.07), transparent 70%);
 }
 
 .panel h3 {
@@ -663,6 +663,37 @@ strong {
   display: none !important;
 }
 
+/* A callout that follows a split (desktop panels above the safety note) needs
+   the same rhythm as the grid gap, or it touches the panels above it. */
+.split + .callout {
+  margin-top: 18px;
+}
+
+/* Compact download action: same shape as the copy button, green to mark it as
+   the primary action in the row. */
+.copy-download {
+  color: var(--ok);
+  border-color: rgba(56, 211, 159, 0.5);
+  text-decoration: none;
+}
+
+.copy-download:hover {
+  border-color: rgba(56, 211, 159, 0.85);
+  background: rgba(56, 211, 159, 0.08);
+  color: var(--ok);
+}
+
+.or-simply {
+  font-size: 13.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* A split left with a single panel (after a removal) spans full width. */
+.split:has(> :only-child) {
+  grid-template-columns: 1fr;
+}
+
 /* ------------------------------------------------------------------ scope */
 
 .scope-note {
@@ -683,7 +714,7 @@ strong {
   text-transform: uppercase;
   color: var(--accent);
   background: var(--accent-soft);
-  border: 1px solid rgba(255, 90, 69, 0.3);
+  border: 1px solid rgba(157, 184, 154, 0.3);
   border-radius: 6px;
   padding: 4px 9px;
   margin-top: 2px;
@@ -760,6 +791,53 @@ strong {
   margin-top: 22px;
 }
 
+/* ------------------------------------------------------- footer grid */
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  gap: 28px;
+  margin-bottom: 30px;
+}
+
+.footer-brand-name {
+  display: block;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+  margin-bottom: 8px;
+}
+
+.footer-tag {
+  display: block;
+  font-size: 13.5px;
+  color: var(--muted);
+  max-width: 30ch;
+}
+
+.footer-col h4 {
+  margin: 0 0 12px;
+  font-size: 11.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  font-weight: 640;
+}
+
+.footer-col a {
+  display: block;
+  font-size: 14px;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: none;
+  margin-bottom: 9px;
+  width: fit-content;
+}
+
+.footer-col a:hover {
+  color: var(--accent);
+  border-bottom-color: transparent;
+}
+
 /* ---------------------------------------------------------------- footer */
 
 .footer {
@@ -783,7 +861,7 @@ strong {
 
 .footer a:hover {
   color: var(--accent);
-  border-bottom-color: rgba(255, 90, 69, 0.5);
+  border-bottom-color: rgba(157, 184, 154, 0.5);
 }
 
 /* ---------------------------------------------------------------- reveal */
@@ -807,6 +885,10 @@ html.js .reveal.in {
   .cards,
   .split {
     grid-template-columns: 1fr;
+  }
+
+  .footer-grid {
+    grid-template-columns: 1fr 1fr;
   }
 
   .callout {
@@ -850,6 +932,11 @@ html.js .reveal.in {
   .scope-note {
     flex-direction: column;
     gap: 12px;
+  }
+
+  .footer-grid {
+    grid-template-columns: 1fr;
+    gap: 22px;
   }
 }
 

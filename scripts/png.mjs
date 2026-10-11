@@ -113,7 +113,8 @@ export function encodePngRgb(width, height, rgb) {
 const SUPER = 8;
 
 const BG = [13, 16, 23]; // #0d1017 - matches the install page background
-const FG = [255, 90, 69]; // #ff5a45 - product accent
+const RING = [216, 226, 213]; // sage calm
+const DOT = [232, 179, 75]; // warm amber
 
 const CORNER_RADIUS = 0.22;
 const RING_RADIUS = 0.29;
@@ -148,12 +149,10 @@ export function renderIcon(size) {
   const half = 0.5;
   const inner = half - CORNER_RADIUS;
 
-  // Slash runs corner to corner across the ring's centreline.
-  const d = RING_RADIUS * Math.SQRT1_2;
-  const ax = half + d;
-  const ay = half - d;
-  const bx = half - d;
-  const by = half + d;
+  // Option A, Concentric calm: open ring with a gap at top right plus a solid centre dot.
+  const DOT_R = 0.085;
+  const GAP_CENTER = -Math.PI / 4; // top right
+  const GAP_HALF = (20 * Math.PI) / 180;
 
   for (let py = 0; py < n; py++) {
     const v = (py + 0.5) / n;
@@ -169,11 +168,16 @@ export function renderIcon(size) {
       const off = py * n + px;
       accCount[off] += 1;
 
-      const ringDist = Math.abs(Math.hypot(u - half, v - half) - RING_RADIUS);
-      const slashDist = distanceToSegment(u, v, ax, ay, bx, by);
-      const isGlyph = ringDist <= STROKE / 2 || slashDist <= STROKE / 2;
+      const distC = Math.hypot(u - half, v - half);
+      const ringDist = Math.abs(distC - RING_RADIUS);
+      let ang = Math.atan2(v - half, u - half);
+      let gap = Math.abs(ang - GAP_CENTER);
+      if (gap > Math.PI) gap = 2 * Math.PI - gap;
+      const inGap = gap < GAP_HALF;
+      const isDot = distC <= DOT_R;
+      const isRing = ringDist <= STROKE / 2 && !inGap;
 
-      const colour = isGlyph ? FG : BG;
+      const colour = isDot ? DOT : isRing ? RING : BG;
       accR[off] += colour[0];
       accG[off] += colour[1];
       accB[off] += colour[2];

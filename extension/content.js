@@ -46,7 +46,7 @@
   const PICK_BAR_STYLE =
     'position:fixed;z-index:2147483647;top:12px;left:50%;transform:translateX(-50%);' +
     'background:#0d1017;color:#e9edf5;font:12px/1.4 ui-sans-serif,system-ui,sans-serif;' +
-    'padding:8px 14px;border-radius:999px;border:1px solid rgba(255,90,69,.5);' +
+    'padding:8px 14px;border-radius:999px;border:1px solid rgba(157,184,154,.55);' +
     'box-shadow:0 8px 24px rgba(0,0,0,.45);pointer-events:none;';
 
   // Ad and tracker hosts a free-tier slot is likely to load from.
@@ -1120,7 +1120,7 @@
     pickHovered = el;
     if (el) {
       pickHoveredOutline = el.style.outline;
-      el.style.outline = '2px solid #ff5a45';
+      el.style.outline = '2px solid #9DB89A';
     }
   }
 
