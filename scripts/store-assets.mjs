@@ -36,8 +36,10 @@ const OUT_DIR = path.join(ROOT, 'site', 'store-assets');
 
 /** Same tokens as site/styles.css, so the tiles match the product. */
 const BG = [11, 13, 18]; // --bg
-const ACCENT = [255, 90, 69]; // --accent
-const AMBER = [255, 176, 32]; // --accent-2
+const ACCENT = [157, 184, 154]; // --accent, calm sage
+const AMBER = [232, 179, 75]; // --accent-2, warm amber
+const RING = [216, 226, 213]; // icon ring, soft sage
+const DOT = [232, 179, 75]; // icon dot, warm amber
 const TEXT = [233, 237, 246]; // --text
 const MUTED = [150, 160, 181]; // --muted
 
@@ -413,26 +415,14 @@ export class Canvas {
     }
   }
 
-  /** The product mark: the prohibited ring, same geometry as the icons. */
-  mark(x, y, size, colour) {
+  /** The product mark: a calm open ring with a centred dot, same geometry as the icons. */
+  mark(x, y, size) {
     const c = size / 2;
     const ring = size * 0.29;
-    const d = ring * Math.SQRT1_2;
+    const dot = size * 0.085;
 
-    this.stroke(
-      arc(0, 0, ring, 0, 360, 48).map(([px, py]) => [x + c + px, y + c + py]),
-      size * 0.13,
-      colour
-    );
-
-    this.stroke(
-      [
-        [x + c + d, y + c - d],
-        [x + c - d, y + c + d],
-      ],
-      size * 0.13,
-      colour
-    );
+    this.stroke(arc(x + c, y + c, ring, -25, 295, 48), size * 0.13, RING);
+    this.stroke(arc(x + c, y + c, dot, 0, 360, 24), dot * 2, DOT);
   }
 
   /** Box-filter the supersampled buffer down to 24-bit RGB. */
@@ -469,7 +459,7 @@ export class Canvas {
 
 /* --------------------------------------------------------------- the images */
 
-const NAME = 'FREEBUFF AD BLOCK';
+const NAME = 'FREEBUFF FOCUS MODE';
 
 /** 440x280 - the small promo tile Chrome and Edge both ask for. */
 function promo() {
@@ -485,7 +475,7 @@ function promo() {
   const captionSize = 12.5;
 
   const markY = 50;
-  canvas.mark((440 - markSize) / 2, markY, markSize, ACCENT);
+  canvas.mark((440 - markSize) / 2, markY, markSize);
 
   const titleBaseline = markY + markSize + 22 + titleSize;
   canvas.text(NAME, (440 - canvas.measure(NAME, titleSize, 0.04)) / 2, titleBaseline, titleSize, TEXT, {
@@ -525,9 +515,9 @@ function marquee() {
 
   canvas.text(eyebrow, textX, 212, eyebrowSize, ACCENT, { tracking: 0.16 });
   canvas.text(NAME, textX, 318, titleSize, TEXT, { tracking: 0.02 });
-  canvas.text('BLOCKS ADS ON FREEBUFF.COM', textX, 366, captionSize, MUTED, { tracking: 0.06 });
+  canvas.text('QUIET SESSIONS FOR FREEBUFF.COM', textX, 366, captionSize, MUTED, { tracking: 0.06 });
 
-  canvas.mark(markX, markY, markSize, ACCENT);
+  canvas.mark(markX, markY, markSize);
 
   return canvas;
 }
@@ -569,10 +559,10 @@ function shotHead(canvas, { eyebrow, title, standfirst, titleSize = 50 }) {
   const titleBaseline = 106 + titleSize;
   canvas.text(title, MARGIN, titleBaseline, titleSize, TEXT, { tracking: 0.01 });
 
-  const brand = 'FREEBUFF AD BLOCK';
+  const brand = NAME;
   const brandSize = 13;
   const brandWidth = canvas.measure(brand, brandSize, 0.14);
-  canvas.mark(SHOT_W - MARGIN - brandWidth - 32, 60, 32, ACCENT);
+  canvas.mark(SHOT_W - MARGIN - brandWidth - 32, 60, 32);
   canvas.text(brand, SHOT_W - MARGIN - brandWidth, 86, brandSize, MUTED, { tracking: 0.14 });
 
   let bottom = titleBaseline;
@@ -646,7 +636,7 @@ function chatCard(canvas, x, y, w, h) {
   canvas.dash(left + 18, slotY + 92, slotRight, slotY + 92, 7, 7, 1.2, ACCENT);
   canvas.dash(left + 18, slotY, left + 18, slotY + 92, 7, 7, 1.2, ACCENT);
   canvas.dash(slotRight, slotY, slotRight, slotY + 92, 7, 7, 1.2, ACCENT);
-  small(canvas, 'AD SLOT - BLOCKED BEFORE IT LOADED', left + 40, slotY + 52, 13, ACCENT, 0.08);
+  small(canvas, 'AD SLOT - PAUSED WHILE YOU FOCUS', left + 40, slotY + 52, 13, ACCENT, 0.08);
 
   bar(canvas, left + 18, replyY + 168, 180, 7);
 
@@ -687,23 +677,23 @@ function shotChat() {
 
   shotHead(canvas, {
     eyebrow: 'CHROME \u00b7 EDGE \u00b7 BRAVE \u00b7 FIREFOX',
-    title: 'THE ADS STOP.',
-    standfirst: 'THE BUILD KEEPS STREAMING - SITE-SCOPED TO FREEBUFF.COM',
+    title: 'STAY IN FLOW.',
+    standfirst: 'QUIET SESSIONS FOR DEEP WORK - FREEBUFF.COM ONLY',
   });
 
   chatCard(canvas, MARGIN, 250, 728, 486);
 
   featureCard(canvas, 824, 250, 384, 148, 'NETWORK', [
-    'AD REQUESTS STOPPED BEFORE',
-    'THEY LEAVE THE TAB',
+    'AD REQUESTS PAUSED WHILE',
+    'FOCUS IS ON',
   ]);
   featureCard(canvas, 824, 418, 384, 148, 'IN-PRODUCT', [
     'THE AD CARDS THE PAGE BUILDS',
     'ITSELF WHILE IT THINKS',
   ]);
   featureCard(canvas, 824, 586, 384, 148, 'HAND-PICKED', [
-    'HIDE ANYTHING ONCE, GONE',
-    'ON EVERY VISIT',
+    'QUIET ANYTHING ONCE, CALM',
+    'IN EVERY SESSION',
   ]);
 
   return canvas;
@@ -730,13 +720,13 @@ function shotPopup() {
   canvas.panel(x, y, w, h, 18, SURFACE);
   canvas.frame(x, y, w, h, 18, 1.2, HAIRLINE);
 
-  canvas.mark(x + 28, y + 28, 36, ACCENT);
-  canvas.text('FREEBUFF AD BLOCK', x + 76, y + 50, 16, TEXT, { tracking: 0.04 });
+  canvas.mark(x + 28, y + 28, 36);
+  canvas.text(NAME, x + 76, y + 50, 16, TEXT, { tracking: 0.04 });
   small(canvas, 'FREEBUFF.COM ONLY', x + 76, y + 70, 11, MUTED, 0.1);
 
   canvas.panel(x + 24, y + 96, w - 48, 1, 0, HAIRLINE);
 
-  canvas.text('BLOCK ADS', x + 24, y + 142, 16, TEXT, { tracking: 0.04 });
+  canvas.text('FOCUS', x + 24, y + 142, 16, TEXT, { tracking: 0.04 });
   small(canvas, 'ON', x + 24, y + 162, 11, MUTED, 0.1);
 
   const toggleX = x + w - 24 - 58;
@@ -744,9 +734,9 @@ function shotPopup() {
   canvas.panel(toggleX + 30, y + 125, 26, 26, 13, TEXT);
 
   canvas.text('12', x + 24, y + 224, 46, TEXT, { tracking: 0.02 });
-  small(canvas, 'AD ELEMENTS HIDDEN ON THIS TAB', x + 24, y + 248, 11, MUTED, 0.08);
+  small(canvas, 'ELEMENTS QUIETED ON THIS TAB', x + 24, y + 248, 11, MUTED, 0.08);
 
-  const buttonLabel = 'HIDE AN ELEMENT ON THE PAGE';
+  const buttonLabel = 'HIDE AN ELEMENT IN FOCUS';
   canvas.panel(x + 24, y + 286, w - 48, 48, 12, ACCENT, 0.14);
   canvas.frame(x + 24, y + 286, w - 48, 48, 12, 1.2, ACCENT, 0.55);
   canvas.text(
@@ -763,18 +753,18 @@ function shotPopup() {
   small(canvas, 'ACTIVE ON THIS TAB', x + 24, y + 408, 11, ACCENT, 0.08);
   small(canvas, 'INSTALL PAGE + DOCS', x + 24, y + 428, 11, MUTED, 0.08);
 
-  callout(canvas, 640, 264, 568, 'BLOCK ADS', [
-    'A PER-SITE SWITCH. OFF LEAVES THE',
-    'PAGE EXACTLY AS IT WAS.',
+  callout(canvas, 640, 264, 568, 'FOCUS SESSIONS', [
+    'A MANUAL SWITCH. OFF RESTORES',
+    'THE PAGE AS IT WAS.',
   ]);
   callout(canvas, 640, 396, 568, 'LIVE COUNT', [
-    'ELEMENTS HIDDEN ON THIS TAB,',
+    'ELEMENTS QUIETED WHILE YOU FOCUS,',
     'COUNTED IN THE BACKGROUND WORKER.',
   ]);
-  callout(canvas, 640, 528, 568, 'HIDE AN ELEMENT', [
-    'CLICK THE BUTTON, THEN THE AD.',
-    'SAVED TO SYNC AND REAPPLIED',
-    'ON EVERY FUTURE VISIT.',
+  callout(canvas, 640, 528, 568, 'PICK AN ELEMENT', [
+    'CLICK THE BUTTON, THEN ANYTHING.',
+    'SAVED AND REAPPLIED IN',
+    'FUTURE SESSIONS.',
   ]);
 
   return canvas;
@@ -795,7 +785,7 @@ function shotLayers() {
 
   const cards = [
     ['01', 'NETWORK', 'RULES.JSON', ['STOPS THE REQUEST', 'BEFORE IT LEAVES', 'THE TAB.']],
-    ['02', 'DOM HOOKS', 'CONTENT.JS', ['REMOVES AD-SHAPED', 'MARKUP THE PAGE', 'BUILDS MID-BUILD.']],
+    ['02', 'DOM HOOKS', 'CONTENT.JS', ['QUIETS AD-SHAPED', 'MARKUP THE PAGE', 'BUILDS MID-BUILD.']],
     ['03', 'PROMOS + PICKER', 'CONTENT.JS', ['FINDS FIRST-PARTY AD', 'CARDS, AND KEEPS', 'WHAT YOU PICK BY HAND.']],
   ];
 
@@ -835,7 +825,7 @@ function shotLayers() {
   );
   small(
     canvas,
-    'EVERY BLOCK RULE SITS AT PRIORITY 1, SO NOTHING CAN WIN AGAINST IT',
+    'EVERY SESSION RULE SITS AT PRIORITY 1, SO NOTHING CAN WIN AGAINST IT',
     MARGIN + 28,
     698,
     13,
@@ -871,8 +861,8 @@ function shotScope() {
 
   small(canvas, 'THE ONLY ORIGIN IT ASKS FOR.', MARGIN + 24, 420, 13, MUTED, 0.04);
   small(canvas, 'NOT ALL URLS, NOT EVERY SITE.', MARGIN + 24, 444, 13, MUTED, 0.04);
-  small(canvas, 'A CONTENT SCRIPT HAS TO BE ABLE TO', MARGIN + 24, 468, 13, MUTED, 0.04);
-  small(canvas, 'READ THE PAGE IT IS CLEANING UP.', MARGIN + 24, 492, 13, MUTED, 0.04);
+  small(canvas, 'A CONTENT SCRIPT ONLY READS', MARGIN + 24, 468, 13, MUTED, 0.04);
+  small(canvas, 'WHILE FOCUS IS ON.', MARGIN + 24, 492, 13, MUTED, 0.04);
 
   const rightX = MARGIN + 580;
   canvas.panel(rightX, 250, 556, 296, 14, SURFACE);
@@ -882,7 +872,7 @@ function shotScope() {
   const rows = ['OTHER SITES AND TABS', 'YOUR BROWSING HISTORY', 'CREDENTIALS AND FORMS'];
   rows.forEach((row, index) => {
     const ry = 322 + index * 52;
-    canvas.mark(rightX + 26, ry, 26, ACCENT);
+    canvas.mark(rightX + 26, ry, 26);
     canvas.text(row, rightX + 70, ry + 21, 15, MUTED, { tracking: 0.05 });
   });
 

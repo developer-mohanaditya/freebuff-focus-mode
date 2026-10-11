@@ -1,4 +1,4 @@
-# Publishing Freebuff Ad Block
+# Publishing Freebuff Focus Mode
 
 Three stores, two packages, one $5 payment. Work top to bottom — Chrome first,
 because the same file goes to Edge, and Firefox is a different package.
@@ -303,36 +303,38 @@ checklist is the same as any other: `npm run build && npm test && npm run valida
 
 ## Copy to paste into the listings
 
-**Name:** `Freebuff Ad Block`
+**Name:** `Freebuff Focus Mode`
 
 **Short description** (fits Chrome's 132-character limit):
 
-> Site-scoped ad blocker for freebuff.com. No accounts, no tracking, no remote code.
+> Quiet focus sessions for freebuff.com. Ads on by default, hidden only while you focus.
 
 **Detailed description:**
 
-> Freebuff Ad Block removes the advertising slots that appear in the freebuff.com
-> web app — including the ones injected while a build is running, which never
-> make a separate network request and so are invisible to a normal blocklist.
+> Freebuff Focus Mode adds quiet sessions to the freebuff.com web app. Flip focus
+> on to hide ad cards and sponsored slots while you work, then restore them with
+> one click. Ads stay on by default.
 >
-> It works in three layers: network rules that stop ad requests before they leave
-> the tab, a DOM layer that clears out slots rendered mid-build, and a picker you
-> can use to hide anything the heuristics miss.
+> It works in three session-scoped layers: network rules that pause ad requests
+> during focus, a DOM layer that quiets slots rendered mid-build, and a picker that
+> quiets anything the heuristics miss in future sessions.
 >
-> **Scoped to one site.** It only ever touches freebuff.com. Requests are matched
-> only when they originate from a freebuff.com page, so it does not follow you
-> anywhere else.
+> **Scoped to one site.** It only ever touches freebuff.com, and only while you
+> focus. Requests are matched only when they originate from a freebuff.com page.
 >
 > **Nothing leaves your browser.** No accounts, no analytics, no telemetry, no
-> remote code. The only stored data is your on/off setting and any element rules
-> you create yourself, kept in the browser's own synced storage.
+> remote code. Stored data is your focus setting and element rules you create,
+> kept in the browser's own synced storage.
 >
 > **It cannot break your build.** A priority-100 allow rule covers freebuff.com's
-> own traffic, so the streaming response is never matched by a block rule.
+> own traffic, so streaming responses are never matched. Outside focus, no rule runs.
+>
+> Unofficial community project. Not affiliated with Freebuff or Codebuff. Ads fund
+> free access, so please flip focus off to support it.
 
 **Single purpose:**
 
-> Hides the advertising slots that freebuff.com renders inside its own interface.
+> Adds user-started focus sessions that temporarily quiet the ad slots freebuff.com renders, restored after each session.
 
 **Permission justifications:**
 
@@ -347,13 +349,13 @@ code; does not sell or transfer data to third parties.
 
 **Privacy statement** (for the privacy policy URL Edge requires):
 
-> Freebuff Ad Block collects nothing. It has no server, no analytics and no
+> Freebuff Focus Mode collects nothing. It has no server, no analytics and no
 > accounts, and it makes no network requests of its own.
 >
 > All processing happens locally in your browser. The only data it stores is your
-> on/off preference and any element rules you create with the picker, both kept in
+> focus preference and any element rules you create with the picker, both kept in
 > the browser's own extension storage and optionally synced by your browser
-> vendor's account — never sent to us.
+> vendor's account, never sent to us.
 >
 > The extension only runs on freebuff.com. It cannot read or modify any other
 > site.

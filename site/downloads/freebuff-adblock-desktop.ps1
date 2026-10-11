@@ -83,7 +83,7 @@ param(
 if ($null -eq $Arguments) { $Arguments = @() }
 
 # Stamped at build time (scripts/build-desktop.mjs).
-$Version = '1.6.0'
+$Version = '1.6.1'
 $Origin = 'https://freebuff-focus-mode.vercel.app'
 
 $Command = ''

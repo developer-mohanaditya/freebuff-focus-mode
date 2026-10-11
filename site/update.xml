@@ -17,6 +17,6 @@
 -->
 <gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
   <app appid='YOUR_EXTENSION_ID_HERE'>
-    <updatecheck codebase='https://freebuff-focus-mode.vercel.app/downloads/freebuff-adblock-1.6.0.zip' version='1.6.0' />
+    <updatecheck codebase='https://freebuff-focus-mode.vercel.app/downloads/freebuff-adblock-1.6.1.zip' version='1.6.1' />
   </app>
 </gupdate>
