@@ -5,7 +5,7 @@
   --line: rgba(255, 255, 255, 0.08);
   --text: #e9edf5;
   --muted: #98a2b6;
-  --accent: #ff5a45;
+  --accent: #9DB89A;
   --accent-soft: rgba(255, 90, 69, 0.16);
 }
 
@@ -251,11 +251,11 @@ body {
 }
 
 .status.warn {
-  color: #ffb020;
+  color: #E8B34B;
 }
 
 .status.warn::before {
-  background: #ffb020;
+  background: #E8B34B;
 }
 
 .foot a {

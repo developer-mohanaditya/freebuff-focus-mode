@@ -241,7 +241,7 @@ console.log('\nthe page itself');
 const page = open({ ua: CHROME, links: LISTINGS });
 const headline = page.document.querySelector('h1').textContent.replace(/\s+/g, ' ').trim();
 
-check('the hero says the ads disappear', headline, 'The ads disappear. The build keeps streaming.');
+check('the hero invites flow while the build streams', headline, 'Stay in flow. The build keeps streaming.');
 check('"How to install" is gone from the hero', page.heroLinks.filter((a) => a.getAttribute('href') === '#install').length, 0);
 /** Which panel a reader is actually looking at, by name. */
 const shownPanel = (view) =>
@@ -352,7 +352,7 @@ const buttonsInPanels = [...page.document.querySelectorAll('[data-platform-panel
 check('no button lives inside a platform panel', buttonsInPanels.length, 0);
 
 const footerText = page.document.querySelector('.footer p').textContent.replace(/\s+/g, ' ').trim();
-check('the footer reads the same version', footerText.includes(`Freebuff Ad Block · v${VERSION}`), true);
+check('the footer reads the same version', footerText.includes(`Freebuff Focus Mode · v${VERSION}`), true);
 
 // The listings as they ship - the stubs above never reach these values.
 check('chrome points at the Chrome Web Store listing', LIVE.chrome, 'https://chromewebstore.google.com/detail/hgkegdgnihnifjmgnihohlaemaafhlgm');

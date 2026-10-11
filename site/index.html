@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Freebuff Ad Block — block ads on freebuff.com</title>
+    <title>Freebuff Focus Mode, quiet sessions for freebuff.com</title>
     <meta
       name="description"
-      content="A site-scoped Chromium extension that removes freebuff.com's ad slots, including the ones injected while a build is thinking."
+      content="A focus companion for freebuff.com. Flip focus on to quiet ad slots while you work, then restore them with one click."
     />
     <meta name="theme-color" content="#0b0d12" />
     <link rel="icon" type="image/png" href="favicon.png" />
@@ -18,12 +18,9 @@
     <header class="topbar">
       <a class="brand" href="/">
         <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-            <circle cx="12" cy="12" r="9" />
-            <path d="M5.6 5.6 18.4 18.4" />
-          </svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#D8E2D5" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="7" stroke-dasharray="38 6" transform="rotate(-45 12 12)" /><circle cx="12" cy="12" r="2.2" fill="#E8B34B" stroke="none" /></svg>
         </span>
-        <span class="brand-name">Freebuff Ad Block</span>
+        <span class="brand-name">Freebuff Focus Mode</span>
       </a>
       <!-- One product, one version. The extension and the desktop patch tool are
            inspected and released together, so this tag carries the same number
@@ -37,14 +34,14 @@
       <section class="hero">
         <p class="eyebrow">Chrome · Edge · Brave · Firefox</p>
         <h1>
-          The ads disappear.<br />
+          Stay in flow.<br />
           <span class="accent">The build keeps streaming.</span>
         </h1>
         <p class="lede">
-          A site-scoped extension for <strong>freebuff.com</strong> only. It blocks ad requests
-          before they leave your browser, then clears out the slots that get injected while the
-          platform is thinking — the ones that appear mid-build and never fire a separate
-          request.
+          A focus companion for <strong>freebuff.com</strong> only. Flip focus on before a deep
+          work block and it quiets ad requests plus the slots that appear mid-build and never fire
+          a separate request. Flip it off when you are done, and everything returns, so free
+          models stay free.
         </p>
 
         <div class="cta-row">
@@ -60,8 +57,8 @@
         <ul class="facts" role="list">
           <li><span class="fact-k">Scope</span><span class="fact-v">freebuff.com only</span></li>
           <li>
-            <span class="fact-k">Permissions</span>
-            <span class="fact-v">2, host access scoped to freebuff.com</span>
+            <span class="fact-k">Mode</span>
+            <span class="fact-v">Quiet only while focus is on</span>
           </li>
           <li><span class="fact-k">Tracking</span><span class="fact-v">None. No network calls.</span></li>
           <li><span class="fact-k">Size</span><span class="fact-v">Under 60&nbsp;KB</span></li>
@@ -72,32 +69,37 @@
       <section class="section" id="how">
         <div class="section-head reveal">
           <p class="eyebrow">How it works</p>
-          <h2>Three layers, in the order they fire</h2>
+          <h2>Three quiet layers, only while you focus</h2>
+          <p class="section-sub">
+            Nothing changes until you flip focus on. Outside focus, the page is untouched.
+          </p>
         </div>
 
         <div class="cards">
           <article class="card reveal">
             <span class="step">01</span>
-            <h3>Network rules</h3>
+            <h3>Pause the noise</h3>
             <p>
-              A <code>declarativeNetRequest</code> ruleset blocks known ad and tracker hosts before
-              the request leaves the tab. Every rule is scoped to requests
-              <em>initiated by</em> freebuff.com, so it never follows you to other sites.
+              A <code>declarativeNetRequest</code> ruleset pauses known ad and tracker hosts before
+              the request leaves the tab, while focus is on. Every rule is scoped to requests
+              <em>initiated by</em> freebuff.com, so it never follows you to other sites. Focus off,
+              requests resume.
             </p>
           </article>
 
           <article class="card reveal">
             <span class="step">02</span>
-            <h3>Mid-build cleanup</h3>
+            <h3>Clear mid build slots</h3>
             <p>
-              Slots rendered client-side never make a separate ad request, so a blocklist cannot
-              see them. A content script watches the DOM and removes the ones inserted while the
-              platform is thinking, then collapses the empty space they leave behind.
+              Slots rendered client-side never make a separate ad request, so a request list cannot
+              see them. While focus is on, a content script watches the DOM and quiets the ones
+              inserted while the platform is thinking, then collapses the empty space they leave
+              behind.
             </p>
             <p>
-              The same layer covers freebuff.com's own in-product promo cards — the ones with a
-              literal <em>AD</em> chip next to CodeRabbit or Baseten. Those are first-party, so only
-              reading the page can remove them. They are matched on the badge text and never on
+              The same layer covers freebuff.com's own in-product promo cards, the ones with a
+              literal <em>AD</em> chip. Those are first-party, so only
+              reading the page can quiet them. They are matched on the badge text and never on
               page text alone, and nothing holding a link-free paragraph, a code block or an editor
               is ever touched.
             </p>
@@ -105,17 +107,17 @@
 
           <article class="card reveal">
             <span class="step">03</span>
-            <h3>One switch</h3>
+            <h3>Focus, then restore</h3>
             <p>
-              The toolbar popup pauses blocking for the whole site in one click and shows what was
-              hidden on the current tab. The setting syncs through
-              <code>chrome.storage</code> — no account, no dashboard.
+              The toolbar popup flips focus for the whole site in one click and shows what was
+              quieted on the current tab. The setting syncs through
+              <code>chrome.storage</code>, no account, no dashboard. On for the work block, off to
+              support free access.
             </p>
             <p>
-              It also carries the escape hatch: <strong>Hide an element on the page</strong>. Click
-              it, click an ad nothing recognised, and the rule sticks on every future visit. That is
-              the part no heuristic can replace — a blocker only finds what it was taught, and the
-              picker is how you teach it.
+              It also carries the escape hatch: <strong>Hide an element in focus</strong>. Click
+              it, click anything nothing recognised, and the rule applies in future focus sessions.
+              That is the part no heuristic can replace. Quiet rules only run while focus is on.
             </p>
           </article>
         </div>
@@ -126,14 +128,15 @@
         <div class="callout reveal">
           <div class="callout-body">
             <p class="eyebrow">The part that matters</p>
-            <h2>It cannot break your build stream</h2>
+            <h2>It cannot break your build</h2>
             <p>
               Your build and thinking progress arrives over XHR and WebSocket from freebuff.com
-              itself. A single mis-scoped rule would cut that off. So the ruleset carries a
-              priority-100 <code>allow</code> rule for freebuff.com's own traffic that every block
-              rule — all priority 1 — has to lose against. Path-based rules are slash-anchored so
+              itself. A single broad rule could cut that off, so the ruleset carries a
+              priority-100 <code>allow</code> rule for freebuff.com's own traffic that every session
+              rule, all priority 1, has to lose against. Path-based rules are slash-anchored so
               <code>/load</code> and <code>/headers</code> can never match, and the content script
-              refuses to hide any element that still holds real content.
+              refuses to quiet any element that still holds real content. Outside focus, no rule
+              runs at all.
             </p>
           </div>
           <div class="callout-aside" aria-hidden="true">
@@ -146,13 +149,13 @@
             <div class="rule">
               <span class="rule-id">id 10</span>
               <span class="rule-pri">priority 1</span>
-              <span class="rule-action block">block</span>
+              <span class="rule-action block">pause</span>
               <span class="rule-dom">doubleclick.net</span>
             </div>
             <div class="rule">
               <span class="rule-id">id 12</span>
               <span class="rule-pri">priority 1</span>
-              <span class="rule-action block">block</span>
+              <span class="rule-action block">pause</span>
               <span class="rule-dom">adnxs.com</span>
             </div>
           </div>
@@ -163,12 +166,13 @@
       <section class="section" id="install">
         <div class="section-head reveal">
           <p class="eyebrow">Install</p>
-          <h2>Load it unpacked — about a minute</h2>
+          <h2>Load it unpacked, about a minute</h2>
           <p class="section-sub">
-            Neither Chromium nor Firefox will install an unsigned extension from a link, so until a
-            store listing is live the path is loading the extracted folder as a developer
-            extension. It behaves exactly like an installed one — in Chromium it persists, in
-            Firefox a temporary add-on lasts until the browser restarts.
+            Neither Chromium nor Firefox installs an unsigned extension from a link, so the manual
+            path loads the extracted folder as a developer
+            extension. It behaves exactly like an installed one. In Chromium it persists, in
+            Firefox a temporary add-on lasts until the browser restarts. Focus stays off after
+            install until your first session.
           </p>
         </div>
 
@@ -182,13 +186,9 @@
                 Chrome will report the extension as unloaded and you will need to point it at the
                 new path again.
               </p>
-              <p>
-                <a class="btn btn-primary" data-zip href="downloads/freebuff-adblock-1.6.0.zip" download>
-                  Download extension
-                  <span class="btn-meta">v<span data-version>1.6.0</span> · zip</span>
-                </a>
-              </p>
               <div class="copy-row">
+                <a class="copy copy-download" data-zip href="downloads/freebuff-adblock-1.6.0.zip" download>Download extension</a>
+                <span class="or-simply">Or simply,</span>
                 <code data-download-path>/downloads/freebuff-adblock-1.6.0.zip</code>
                 <button type="button" class="copy" data-copy>Copy</button>
               </div>
@@ -200,8 +200,8 @@
             <div>
               <h3>Open the extensions page</h3>
               <p>
-                Visit <code>chrome://extensions</code> — or <code>edge://extensions</code> /
-                <code>brave://extensions</code> — and switch on <strong>Developer mode</strong> in
+                Visit <code>chrome://extensions</code>, or <code>edge://extensions</code> /
+                <code>brave://extensions</code>, and switch on <strong>Developer mode</strong> in
                 the top right corner.
               </p>
             </div>
@@ -213,7 +213,7 @@
               <h3>Choose Load unpacked</h3>
               <p>
                 Press <strong>Load unpacked</strong> and select the extracted
-                <code>freebuff-adblock</code> folder — the one containing
+                <code>freebuff-adblock</code> folder, the one containing
                 <code>manifest.json</code>. The toolbar icon appears and you are done.
               </p>
             </div>
@@ -225,8 +225,8 @@
               <h3>Reload your open freebuff.com tabs</h3>
               <p>
                 Content scripts only attach to pages loaded after the extension is enabled. Reload
-                any tab that was already open, then check the popup — the hidden-element counter
-                starts climbing.
+                any tab that was already open, open the popup, and flip focus on. Flip it off when
+                the block ends to bring everything back.
               </p>
             </div>
           </li>
@@ -234,28 +234,11 @@
 
         <div class="split">
           <div class="panel reveal">
-            <h3>Firefox</h3>
-            <p>
-              Firefox has no Manifest V3 service worker, so it runs the background as an event
-              page. That key is Manifest&nbsp;V2 as far as Chromium is concerned: ignored, but
-              reported as a warning on the extensions page. Rather than make every package carry
-              it, the build writes a Firefox variant with the key added. Everything else is
-              shared — the same ruleset, the same content script, the same popup.
-            </p>
-            <p>
-              <a href="downloads/freebuff-adblock-1.6.0-firefox.zip" download>Download the Firefox
-              package</a>, then open <code>about:debugging#/runtime/this-firefox</code>, choose
-              <strong>Load Temporary Add-on</strong>, and select <code>manifest.json</code> from
-              the folder you extracted. A temporary add-on lasts until Firefox restarts — a build
-              signed on addons.mozilla.org is the persistent route.
-            </p>
-          </div>
-
-          <div class="panel reveal">
             <h3>What a listing changes</h3>
             <p>
               A store listing removes every step above: one click, and the store handles updates.
               It is also the only route that survives a restart without reloading anything by hand.
+              Either way, focus stays off until you flip it on.
             </p>
             <p class="fine">
               Two packages are built for submission, both with <code>manifest.json</code> at the
@@ -264,8 +247,8 @@
             </p>
             <p class="fine">
               Safari is the exception. It needs a separate build wrapped in a native app and a paid
-              Apple developer account, so browsers that detect as Safari get no button at all —
-              better a missing button than one that leads nowhere.
+              Apple developer account, so browsers that detect as Safari get no button at all.
+              Better a missing button than one that leads nowhere.
             </p>
           </div>
         </div>
@@ -302,12 +285,12 @@
             </p>
             <ul role="list">
               <li>
-                <strong>Managed policy</strong> — set <code>ExtensionInstallForcelist</code> on
+                <strong>Managed policy</strong>, set <code>ExtensionInstallForcelist</code> on
                 your own machine, pointing at the feed. Chrome then installs, updates and
                 reloads it for you.
               </li>
               <li>
-                <strong>Chrome Web Store</strong> — publish it and the store handles distribution
+                <strong>Chrome Web Store</strong>, publish it and the store handles distribution
                 and rollouts entirely.
               </li>
             </ul>
@@ -323,11 +306,12 @@
       <section class="section" id="desktop">
         <div class="section-head reveal">
           <p class="eyebrow">Desktop app</p>
-          <h2>The desktop app, blocked the same way</h2>
+          <h2>The desktop app, with focus sessions</h2>
           <p class="section-sub">
             Freebuff Desktop is a separate app that renders its ads from a runtime inside its own
-            bundle — there is no extension surface, so a browser extension can never reach it. This
-            is the other half: a small local tool that turns that ad runtime off in place. It runs
+            bundle, so no browser extension can ever reach it. This
+            is the other half: a small local tool for focus blocks. Run install before deep work to
+            quiet the ad runtime in place, run revert after to bring it back. It runs
             entirely on your machine, needs no account, and sends nothing anywhere.
           </p>
         </div>
@@ -367,7 +351,7 @@
           </button>
         </div>
         <p class="fine platform-note">
-          All three have a tool. Pick your platform — the switch opens on the one you are reading
+          All three have a tool. Pick your platform, the switch opens on the one you are reading
           this on, and each tab's download is that platform's build.
         </p>
 
@@ -375,9 +359,10 @@
           <div class="panel reveal">
             <h3>Run it</h3>
             <p>
-              One line, and nothing to install first — macOS already ships the <code>sh</code> and
+              One line, and nothing to install first. macOS already ships the <code>sh</code> and
               <code>perl</code> it uses. The tool writes a copy of the original file before it
-              touches anything, and <code>revert</code> puts it back.
+              touches anything, and <code>revert</code> puts it back. Install for the work block,
+              revert to support free access.
             </p>
             <div class="copy-row">
               <code data-desktop-command>curl -fsSL https://freebuff-adblocker.vercel.app/downloads/freebuff-adblock-desktop.sh | sh</code>
@@ -385,22 +370,22 @@
             </div>
             <p class="fine">
               Prefer a file? <a data-desktop-zip href="downloads/freebuff-adblock-desktop-1.6.0.zip" download>Download
-              the tool</a> — a zip with a double-clickable launcher and a short read-me — then run
+              the tool</a>, a zip with a double-clickable launcher and a short read-me, then run
               <code>sh freebuff-adblock.sh install</code>.
             </p>
             <p class="fine">
               Report what is applied, and change nothing:
               <code>sh freebuff-adblock.sh status</code>. Check what the app you have open
-              actually loaded — it waits for the relaunch and then says so:
+              actually loaded, it waits for the relaunch and then says so:
               <code>sh freebuff-adblock.sh verify</code>. Undo it:
               <code>sh freebuff-adblock.sh revert</code>.
             </p>
             <p class="fine">
-              Tool v<span data-version>1.6.0</span>, anchored against Freebuff Desktop
-              <strong>0.0.164</strong>: it forces the ad auction to return nothing and cuts the ad
-              client off from its API, and it undoes its own write if the result does not check
-              out. If a Freebuff release moves something it cannot recognise, it refuses and
-              prints the counts it saw instead of guessing — and
+              Tool v<span data-version>1.6.0</span>, matched to Freebuff Desktop
+              <strong>0.0.164</strong>: while applied, it quiets the ad auction and pauses the ad
+              client API path, and it undoes its own write if the result does not check
+              out. If a Freebuff release moves code it cannot recognise, it refuses and
+              prints the counts it saw instead of guessing, and
               <code>sh freebuff-adblock.sh scan</code> prints what the installed build actually
               contains, changing nothing. An older Freebuff with a different arrangement is
               refused, not half-patched.
@@ -426,8 +411,9 @@
               </li>
               <li>
                 <strong>After a Freebuff update, run it again.</strong> An update replaces the
-                app's Resources folder, so the patch goes with it. The backup is kept for each
-                version, so reverting an older one still works.
+                app's Resources folder, so the quiet state goes with it. The backup is kept for each
+                version, so reverting an older one still works. When the block ends, revert and
+                relaunch to bring ads back.
               </li>
             </ol>
           </div>
@@ -437,11 +423,11 @@
           <div class="panel reveal">
             <h3>Run it</h3>
             <p>
-              One line in PowerShell, and nothing to install first — Windows ships PowerShell,
+              One line in PowerShell, and nothing to install first, Windows ships PowerShell,
               <code>irm</code> and <code>iex</code> with the OS. Piping straight into
               <code>iex</code> is also the easier way in: no file is written to disk, so Windows
-              never tags it as a download, and the execution policy — which governs
-              <code>.ps1</code> <em>files</em> — never comes into it. The tool writes a copy of the
+              never tags it as a download, and the execution policy, which governs
+              <code>.ps1</code> <em>files</em>, never comes into it. The tool writes a copy of the
               original file before it touches anything, and <code>revert</code> puts it back.
             </p>
             <div class="copy-row">
@@ -455,7 +441,7 @@
                  text on the orange fill. See the guard in site/styles.css. -->
             <p class="fine">
               Prefer a file? <a data-desktop-win-zip href="downloads/freebuff-adblock-desktop-1.6.0-windows.zip" download>Download
-              the tool</a> — a zip with a double-clickable launcher and a short read-me. A saved
+              the tool</a>, a zip with a double-clickable launcher and a short read-me. A saved
               file carries the mark-of-the-web, so either unblock it first with
               <code>Unblock-File .\freebuff-adblock-desktop.ps1</code>, or run it the way the
               launcher does:
@@ -472,14 +458,14 @@
             </p>
             <p class="fine">
               Tool v<span data-version>1.6.0</span>, anchored against Freebuff Desktop
-              <strong>0.0.164</strong> — the same two anchors as the macOS tool: it forces the ad
+              <strong>0.0.164</strong>, the same two anchors as the macOS tool: it forces the ad
               auction to return nothing and cuts the ad client off from its API, and it undoes its
               own write if the result does not check out. It finds the install itself (the per-user
               folder under <code>%LOCALAPPDATA%\Programs</code>, Program Files, Squirrel's
               <code>app-&lt;version&gt;</code> folders, and the uninstall registry entries), and
               <code>-App</code> points it somewhere else if your copy lives off the beaten path. If
               a Freebuff release moves something it cannot recognise, it refuses and prints the
-              counts it saw instead of guessing — and
+              counts it saw instead of guessing, and
               <code>… ([scriptblock]::Create($s)) scan</code> prints what the installed build
               actually contains, changing nothing.
             </p>
@@ -489,7 +475,7 @@
             <h3>After you run it</h3>
             <ol class="mini-steps">
               <li>
-                <strong>Quit Freebuff completely</strong> and reopen it — from the tray icon, or
+                <strong>Quit Freebuff completely</strong> and reopen it, from the tray icon, or
                 by ending <code>Freebuff.exe</code> in Task Manager. The orchestrator is read once
                 at launch, so bringing the window forward is not enough. The tool waits for that
                 relaunch and then reports what it finds: whether the running process started after
@@ -498,7 +484,7 @@
               </li>
               <li>
                 <strong>If it says Freebuff has the file open</strong>, that is Windows refusing to
-                replace a file another process is holding — quit Freebuff properly (closing the
+                replace a file another process is holding, quit Freebuff properly (closing the
                 window is not always quitting) and run it again. The tool will not force the write.
               </li>
               <li>
@@ -521,12 +507,12 @@
           <div class="panel reveal">
             <h3>Run it</h3>
             <p>
-              One line, and nothing to install first — it is a shell script using the
+              One line, and nothing to install first, it is a shell script using the
               <code>perl</code> and <code>pgrep</code> your distribution already has. Freebuff for
               Linux ships as an <strong>AppImage</strong>: one executable holding a read-only
               filesystem, so there is no file inside it to patch. The tool never writes to your
-              download. It extracts the image with the runtime the image itself carries — no FUSE,
-              no <code>squashfs-tools</code>, no root — patches that copy, and tells you to start
+              download. It extracts the image with the runtime the image itself carries, no FUSE,
+              no <code>squashfs-tools</code>, no root, patches that copy, and tells you to start
               it instead.
             </p>
             <div class="copy-row">
@@ -537,28 +523,28 @@
                  Windows panel and the `:not(.btn)` guard in styles.css. -->
             <p class="fine">
               Prefer a file? <a data-desktop-linux-zip href="downloads/freebuff-adblock-desktop-1.6.0-linux.zip" download>Download
-              the tool</a> — a zip with the script and a short read-me — then run
+              the tool</a>, a zip with the script and a short read-me, then run
               <code>sh freebuff-adblock-linux.sh</code>.
             </p>
             <p class="fine">
               Report what is applied, and change nothing:
               <code>sh freebuff-adblock-linux.sh status</code>. Check what the copy you started
-              actually loaded — it waits for the relaunch and then says so:
+              actually loaded, it waits for the relaunch and then says so:
               <code>sh freebuff-adblock-linux.sh verify</code>. Undo it:
               <code>sh freebuff-adblock-linux.sh revert</code>. Pointed at a directory
-              instead — an AppDir you extracted yourself — it patches in place, exactly like the
+              instead, an AppDir you extracted yourself, it patches in place, exactly like the
               macOS tool.
             </p>
             <p class="fine">
               Tool v<span data-version>1.6.0</span>, anchored against Freebuff Desktop
-              <strong>0.0.164</strong> — the same two anchors, verified against the real Linux
+              <strong>0.0.164</strong>, the same two anchors, verified against the real Linux
               build: it forces the ad auction to return nothing and cuts the ad client off from its
               API, and it undoes its own write if the result does not check out. It looks for
               <code>*Freebuff*.AppImage</code> in <code>~/Applications</code>,
               <code>~/Downloads</code>, <code>~/.local/bin</code>, <code>/opt</code> and elsewhere,
               and <code>--app</code> points it at the image or directory you mean. If a Freebuff
               release moves something it cannot recognise, it refuses and prints the counts it saw
-              instead of guessing — and <code>scan</code> prints what that build actually
+              instead of guessing, and <code>scan</code> prints what that build actually
               contains, changing nothing.
             </p>
           </div>
@@ -570,7 +556,7 @@
                 <strong>Start the patched copy, not the image.</strong> The path is printed for
                 you, and it is under <code>~/.local/share/freebuff-adblock</code>. The orchestrator
                 is read once at launch, so the patch only takes effect on the next start. Your
-                original <code>.AppImage</code> is untouched — keep it as the unpatched fallback,
+                original <code>.AppImage</code> is untouched, keep it as the unpatched fallback,
                 because running it still shows ads.
               </li>
               <li>
@@ -582,7 +568,7 @@
               <li>
                 <strong>If the directory is not writable</strong>, you are pointing at a
                 system-wide install under <code>/opt</code> or <code>/usr</code>, which belongs to
-                root. Use the AppImage path instead — that never needs it — or re-run the same
+                root. Use the AppImage path instead, that never needs it, or re-run the same
                 command with <code>sudo</code> if you really mean to patch the system copy. The
                 tool never escalates by itself and never asks for a password.
               </li>
@@ -602,11 +588,11 @@
             <p>
               The tool matches the exact ad code it expects to find, and only the ad code: the one
               gate the ad auction consults, and the one request helper every ad API call goes
-              through. It counts every anchor before it writes, and if the numbers do not match — a
-              new Freebuff version that renamed something, or a file someone already edited — it
+              through. It counts every anchor before it writes, and on a mismatch from a
+              new Freebuff version or a hand edited file, it
               stops and changes nothing, rather than half-patching a 9&nbsp;MB file. Every run
               prints what it found first, so <code>status</code> tells you exactly what is applied
-              on your machine.
+              on your machine. Revert restores the original.
             </p>
           </div>
           <div class="callout-aside" aria-hidden="true">
@@ -631,26 +617,50 @@
         <div class="scope-note reveal">
           <span class="scope-label">Scope</span>
           <p>
-            Two apps, one idea, and a tool for each — because neither can reach the other. The
+            Two apps, one idea, one focus flip each, because neither can reach the other. The
             <strong>web version</strong> is covered by the extension above, which a browser can
             only reach because Chromium renders the page. The <strong>desktop app</strong> is a
             separate bundle with no extension surface, so it is covered by the local tool in
             <a href="#desktop">For Desktop</a> instead: one build per platform, macOS, Windows and
             Linux. Neither has a server, an account or a telemetry endpoint, and neither touches
-            anything outside freebuff.com and your own machine.
+            anything outside freebuff.com and your own machine. Sessions are local, manual, and
+            reversible.
           </p>
         </div>
       </section>
     </main>
 
     <footer class="footer">
+      <div class="footer-grid">
+        <div>
+          <span class="footer-brand-name">Freebuff Focus Mode</span>
+          <span class="footer-tag">Quiet sessions for deep work on freebuff.com. Unofficial community project.</span>
+        </div>
+        <div class="footer-col">
+          <h4>Download</h4>
+          <a href="https://chromewebstore.google.com/detail/hgkegdgnihnifjmgnihohlaemaafhlgm" rel="noopener">Chrome</a>
+          <a href="https://addons.mozilla.org/en-US/firefox/addon/freebuff-ad-block/" rel="noopener">Firefox</a>
+          <a href="#install">Edge (manual)</a>
+        </div>
+        <div class="footer-col">
+          <h4>Product</h4>
+          <a href="#how">How it works</a>
+          <a href="#install">Install</a>
+          <a href="#desktop">Desktop app</a>
+          <a href="#updates">Updates</a>
+        </div>
+        <div class="footer-col">
+          <h4>Project</h4>
+          <a href="privacy.html">Privacy policy</a>
+          <a href="https://github.com/developer-mohanaditya/freebuff-ad-blocker/issues" rel="noopener">Report an issue</a>
+        </div>
+      </div>
       <p>
-        Freebuff Ad Block · v<span data-version>1.6.0</span> · site-scoped, no accounts, no
+        Freebuff Focus Mode · v<span data-version>1.6.0</span> · ads on by default, no accounts, no
         telemetry.
       </p>
       <p class="fine">
-        <a href="privacy.html">Privacy policy</a> · source lives in <code>extension/</code>; the
-        package and feed are rebuilt from it on every build.
+        Not affiliated with Freebuff or Codebuff. Ads fund free models, please flip focus off to support them.
       </p>
     </footer>
 

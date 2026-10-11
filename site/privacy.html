@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Privacy policy — Freebuff Ad Block</title>
+    <title>Privacy policy, Freebuff Focus Mode</title>
     <meta
       name="description"
-      content="Freebuff Ad Block collects nothing. No accounts, no analytics, no telemetry, no remote code — what the extension does and does not do with your data."
+      content="Freebuff Focus Mode collects nothing. No accounts, no analytics, no telemetry, no remote code."
     />
     <meta name="theme-color" content="#0b0d12" />
     <link rel="icon" type="image/png" href="favicon.png" />
@@ -18,12 +18,9 @@
     <header class="topbar">
       <a class="brand" href="/">
         <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-            <circle cx="12" cy="12" r="9" />
-            <path d="M5.6 5.6 18.4 18.4" />
-          </svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#D8E2D5" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="7" stroke-dasharray="38 6" transform="rotate(-45 12 12)" /><circle cx="12" cy="12" r="2.2" fill="#E8B34B" stroke="none" /></svg>
         </span>
-        <span class="brand-name">Freebuff Ad Block</span>
+        <span class="brand-name">Freebuff Focus Mode</span>
       </a>
       <!-- Same tag as the install page: one product, one version. -->
       <span class="pill">v<span data-version>1.6.0</span></span>
@@ -35,9 +32,9 @@
           <p class="eyebrow">Privacy</p>
           <h1>Privacy policy</h1>
           <p class="section-sub">
-            Freebuff Ad Block collects nothing. This page spells out exactly what that means: what
+            Freebuff Focus Mode collects nothing. This page states what that means: what
             the extension does, what stays on your own machine, and the one thing your browser may
-            sync without asking us anything.
+            sync on its own.
           </p>
         </div>
 
@@ -53,18 +50,20 @@
         <div class="policy reveal">
           <h2>The short version</h2>
           <p>
-            Freebuff Ad Block has no server and no backend. It does not collect, store, transmit,
+            Freebuff Focus Mode has no server and no backend. It does not collect, store, transmit,
             sell or share personal data, and it never contacts anything operated by us. All of its
-            work happens locally in your browser, on one site: <strong>freebuff.com</strong>.
+            work happens locally in your browser, on one site: <strong>freebuff.com</strong>. Focus
+            sessions live on your device only.
           </p>
 
           <h2>What the extension does</h2>
           <p>
-            It removes the advertising slots that appear inside the freebuff.com web app. It does
-            that in three ways: a <code>declarativeNetRequest</code> ruleset stops requests to known
-            ad and tracker hosts before they leave the tab, a content script clears out slots the
-            page injects while a build is running, and a picker lets you hide anything the
-            heuristics miss. Nothing in that process reads, copies or sends your data anywhere.
+            It quiets the advertising slots inside the freebuff.com web app while focus is on. It
+            does that in three ways: a <code>declarativeNetRequest</code> ruleset pauses requests to known
+            ad and tracker hosts before they leave the tab, a content script quiets slots the
+            page injects while a build is running, and a picker quiets anything the
+            heuristics miss in future sessions. Nothing in that process reads, copies or sends your data anywhere.
+            Outside focus, it changes nothing.
           </p>
 
           <h2>What is stored, and where</h2>
@@ -73,11 +72,11 @@
           </p>
           <ul>
             <li>
-              <strong>Your on/off setting</strong> — one boolean, whether blocking is enabled.
+              <strong>Your focus setting</strong>, one boolean, whether focus is on.
             </li>
             <li>
-              <strong>Element rules you create yourself</strong> — the CSS selectors saved when you
-              use <em>Hide an element on the page</em>.
+              <strong>Element rules you create yourself</strong>, the CSS selectors saved when you
+              use <em>Hide an element in focus</em>.
             </li>
           </ul>
           <p>
@@ -85,7 +84,7 @@
             <code>freebuffAdBlockSelectors</code>. If you are signed in to Chrome, Edge or Brave,
             your browser may sync extension storage through your own account
             (<code>storage.sync</code>). That transfer is between you and your browser vendor, under
-            their privacy policy — it never passes through us, because there is nothing of ours for
+            their privacy policy, it never passes through us, because there is nothing of ours for
             it to pass through. Signing out or disabling browser sync keeps the data entirely on
             the device.
           </p>
@@ -99,32 +98,32 @@
           <p>
             The extension makes <strong>no network requests of its own</strong>. There is no
             analytics, no telemetry, no crash reporting, no update ping, no remote configuration and
-            no advertising SDK. Every part of it — the ruleset, the content script, the popup —
+            no advertising SDK. Every part of it, the ruleset, the content script, the popup ,
             ships inside the package, so there is no remote code to fetch and nothing to execute
             that did not arrive with the install.
           </p>
           <p>
-            It does change what your browser requests on freebuff.com: the ruleset blocks requests
+            While focus is on, it changes what your browser requests on freebuff.com: the ruleset pauses requests
             to known ad and tracker hosts when those requests originate from a freebuff.com page. A
-            blocked request is dropped locally. That event is not logged, counted or reported
+            paused request is dropped locally. That event is not logged, counted or reported
             anywhere. A priority-100 <code>allow</code> rule covers freebuff.com's own traffic, so
-            the extension never blocks the site itself.
+            the extension never touches the site itself. Focus off, requests resume.
           </p>
 
           <h2>Permissions, and why each one is needed</h2>
           <ul>
             <li>
-              <strong><code>declarativeNetRequest</code></strong> — block requests to known
-              ad-network hosts that originate from freebuff.com pages.
+              <strong><code>declarativeNetRequest</code></strong>, pause requests to known
+              ad-network hosts that originate from freebuff.com pages, while focus is on.
             </li>
             <li>
-              <strong><code>storage</code></strong> — remember your on/off setting and the element
+              <strong><code>storage</code></strong>, remember your on/off setting and the element
               rules you create with the picker.
             </li>
             <li>
               <strong>Host access: <code>*://freebuff.com/*</code> and
-              <code>*://*.freebuff.com/*</code></strong> — the content script has to read
-              freebuff.com pages to find and hide the ad slots the page renders itself.
+              <code>*://*.freebuff.com/*</code></strong>, the content script has to read
+              freebuff.com pages to find and quiet the ad slots the page renders itself, while focus is on.
             </li>
           </ul>
           <p>
@@ -146,8 +145,8 @@
           <p>
             The page you are reading is static HTML, CSS and JavaScript. It sets no cookies, runs no
             analytics, loads no third-party scripts, fonts or pixels, and does not profile you in
-            any way. Our hosting provider keeps standard server access logs — IP address, user
-            agent, requested path — for security and abuse prevention, as any web host does.
+            any way. Our hosting provider keeps standard server access logs, IP address, user
+            agent, requested path, for security and abuse prevention, as any web host does.
           </p>
 
           <h2>Children</h2>
@@ -174,22 +173,42 @@
             >.
           </p>
 
-          <p class="fine">Last updated: 1 October 2026 · applies to Freebuff Ad Block
-            <span data-version>1.6.0</span> and later.</p>
+          <p class="fine">Last updated: October 2026 · applies to Freebuff Focus Mode
+            <span data-version>1.6.0</span> and later. Unofficial project, not affiliated with Freebuff or Codebuff.</p>
         </div>
       </section>
     </main>
 
     <footer class="footer">
+      <div class="footer-grid">
+        <div>
+          <span class="footer-brand-name">Freebuff Focus Mode</span>
+          <span class="footer-tag">Quiet sessions for deep work on freebuff.com. Unofficial community project.</span>
+        </div>
+        <div class="footer-col">
+          <h4>Download</h4>
+          <a href="https://chromewebstore.google.com/detail/hgkegdgnihnifjmgnihohlaemaafhlgm" rel="noopener">Chrome</a>
+          <a href="https://addons.mozilla.org/en-US/firefox/addon/freebuff-ad-block/" rel="noopener">Firefox</a>
+          <a href="/#install">Edge (manual)</a>
+        </div>
+        <div class="footer-col">
+          <h4>Product</h4>
+          <a href="/#how">How it works</a>
+          <a href="/#install">Install</a>
+          <a href="/#desktop">Desktop app</a>
+        </div>
+        <div class="footer-col">
+          <h4>Project</h4>
+          <a href="/">Install page</a>
+          <a href="https://github.com/developer-mohanaditya/freebuff-ad-blocker/issues" rel="noopener">Report an issue</a>
+        </div>
+      </div>
       <p>
-        Freebuff Ad Block · v<span data-version>1.6.0</span> · site-scoped, no accounts, no
+        Freebuff Focus Mode · v<span data-version>1.6.0</span> · ads on by default, no accounts, no
         telemetry.
       </p>
       <p class="fine">
-        <a href="/">Install page</a> ·
-        <a href="https://github.com/developer-mohanaditya/freebuff-ad-blocker/issues" rel="noopener"
-          >Report an issue</a
-        >
+        Not affiliated with Freebuff or Codebuff. Ads fund free models, please flip focus off to support them.
       </p>
     </footer>
 
