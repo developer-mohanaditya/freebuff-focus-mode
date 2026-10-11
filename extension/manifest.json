@@ -1,17 +1,23 @@
 {
   "manifest_version": 3,
-  "name": "Freebuff Ad Block",
-  "short_name": "FB Ad Block",
+  "name": "Freebuff Focus Mode",
+  "short_name": "FB Focus",
   "version": "1.6.0",
-  "description": "Blocks the ads on freebuff.com. Site-scoped, no tracking, no accounts, nothing collected.",
-  "permissions": ["declarativeNetRequest", "storage"],
-  "host_permissions": ["*://freebuff.com/*", "*://*.freebuff.com/*"],
+  "description": "Quiet focus sessions for freebuff.com. Ads on by default, hidden only while you focus.",
+  "permissions": [
+    "declarativeNetRequest",
+    "storage"
+  ],
+  "host_permissions": [
+    "*://freebuff.com/*",
+    "*://*.freebuff.com/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Freebuff Ad Block",
+    "default_title": "Freebuff Focus Mode",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -27,8 +33,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://freebuff.com/*", "*://*.freebuff.com/*"],
-      "js": ["content.js"],
+      "matches": [
+        "*://freebuff.com/*",
+        "*://*.freebuff.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }

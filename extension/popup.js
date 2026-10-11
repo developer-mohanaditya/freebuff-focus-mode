@@ -1,5 +1,5 @@
 /**
- * Freebuff Ad Block - popup.
+ * Freebuff Focus Mode - popup.
  *
  * The toggle writes to chrome.storage.sync; the content script listens for
  * chrome.storage.onChanged and applies it. The popup never talks to the page
@@ -23,7 +23,7 @@ installLink.href = INSTALL_URL;
 
 function renderToggle(enabled) {
   toggle.setAttribute('aria-checked', enabled ? 'true' : 'false');
-  stateText.textContent = enabled ? 'On' : 'Paused';
+  stateText.textContent = enabled ? 'Focusing' : 'Ads showing';
   stateText.classList.toggle('on', enabled);
 }
 
@@ -79,13 +79,13 @@ chrome.storage.sync.get({ [CUSTOM_KEY]: [] }, (value) => {
 
 pickButton.addEventListener('click', () => {
   if (activeTabId === undefined) {
-    renderStatus('Open freebuff.com to pick an element', 'warn');
+    renderStatus('Open freebuff.com to quiet an element', 'warn');
     return;
   }
 
   chrome.tabs.sendMessage(activeTabId, { type: PICK_TYPE }, () => {
     if (chrome.runtime.lastError) {
-      renderStatus('Not running here - reload this tab', 'warn');
+      renderStatus('Not running here, reload this tab', 'warn');
       return;
     }
     // Get out of the way so the page is clickable.
@@ -115,22 +115,22 @@ function renderStatus(text, kind) {
  */
 function checkTab(tab) {
   if (!tab || tab.id === undefined) {
-    renderStatus('Open freebuff.com to start blocking', 'warn');
+    renderStatus('Open freebuff.com to start focus', 'warn');
     return;
   }
 
   if (!SITE_URL.test(tab.url || '')) {
-    renderStatus('Not a freebuff.com tab — nothing to do here', 'warn');
+    renderStatus('Not a freebuff.com tab, nothing to quiet here', 'warn');
     return;
   }
 
   chrome.tabs.sendMessage(tab.id, { type: PING_TYPE }, (response) => {
     if (chrome.runtime.lastError || !response || !response.ok) {
-      renderStatus('Not running here — reload this tab', 'warn');
+      renderStatus('Not running here, reload this tab', 'warn');
       return;
     }
     renderStatus(
-      response.enabled ? `Active on this tab (v${response.version})` : 'Paused on this tab',
+      response.enabled ? `Focusing on this tab (v${response.version})` : 'Ads showing on this tab',
       response.enabled ? 'live' : 'warn'
     );
   });
