@@ -800,11 +800,16 @@ strong {
   margin-bottom: 30px;
 }
 
+.footer-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+
 .footer-brand-name {
-  display: block;
   font-weight: 640;
   letter-spacing: -0.01em;
-  margin-bottom: 8px;
 }
 
 .footer-tag {
@@ -812,6 +817,13 @@ strong {
   font-size: 13.5px;
   color: var(--muted);
   max-width: 30ch;
+}
+
+.footer-unofficial {
+  display: block;
+  font-size: 12.5px;
+  color: var(--muted-2);
+  margin-top: 4px;
 }
 
 .footer-col h4 {
