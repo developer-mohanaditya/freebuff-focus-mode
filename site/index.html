@@ -365,7 +365,7 @@
               revert to support free access.
             </p>
             <div class="copy-row">
-              <code data-desktop-command>curl -fsSL https://freebuff-adblocker.vercel.app/downloads/freebuff-adblock-desktop.sh | sh</code>
+              <code data-desktop-command>curl -fsSL https://freebuff-focus-mode.vercel.app/downloads/freebuff-adblock-desktop.sh | sh</code>
               <button type="button" class="copy" data-copy>Copy</button>
             </div>
             <p class="fine">
@@ -431,7 +431,7 @@
               original file before it touches anything, and <code>revert</code> puts it back.
             </p>
             <div class="copy-row">
-              <code data-desktop-win-command>irm https://freebuff-adblocker.vercel.app/downloads/freebuff-adblock-desktop.ps1 | iex</code>
+              <code data-desktop-win-command>irm https://freebuff-focus-mode.vercel.app/downloads/freebuff-adblock-desktop.ps1 | iex</code>
               <button type="button" class="copy" data-copy>Copy</button>
             </div>
             <!-- The same shape as the macOS panel's download: an inline link in the
@@ -516,7 +516,7 @@
               it instead.
             </p>
             <div class="copy-row">
-              <code data-desktop-linux-command>curl -fsSL https://freebuff-adblocker.vercel.app/downloads/freebuff-adblock-desktop-linux.sh | sh</code>
+              <code data-desktop-linux-command>curl -fsSL https://freebuff-focus-mode.vercel.app/downloads/freebuff-adblock-desktop-linux.sh | sh</code>
               <button type="button" class="copy" data-copy>Copy</button>
             </div>
             <!-- Inline link, like the other two panels: see the note in the
@@ -633,8 +633,12 @@
     <footer class="footer">
       <div class="footer-grid">
         <div>
-          <span class="footer-brand-name">Freebuff Focus Mode</span>
-          <span class="footer-tag">Quiet sessions for deep work on freebuff.com. Unofficial community project.</span>
+          <span class="footer-brand">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#D8E2D5" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7" stroke-dasharray="38 6" transform="rotate(-45 12 12)" /><circle cx="12" cy="12" r="2.2" fill="#E8B34B" stroke="none" /></svg>
+            <span class="footer-brand-name">Freebuff Focus Mode</span>
+          </span>
+          <span class="footer-tag">Quiet sessions for deep work on freebuff.com.</span>
+          <span class="footer-unofficial">Unofficial community project.</span>
         </div>
         <div class="footer-col">
           <h4>Download</h4>
@@ -665,5 +669,9 @@
     </footer>
 
     <script src="app.js"></script>
+    <script type="module">
+      import { inject } from './va.js';
+      if (!['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) inject();
+    </script>
   </body>
 </html>

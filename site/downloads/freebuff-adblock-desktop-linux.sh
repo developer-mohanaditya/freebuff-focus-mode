@@ -72,7 +72,7 @@ set -u
 
 # Stamped at build time (scripts/build-desktop.mjs).
 VERSION="1.6.0"
-ORIGIN="https://freebuff-adblocker.vercel.app"
+ORIGIN="https://freebuff-focus-mode.vercel.app"
 
 BACKUP_DIR="${FREEBUFF_ADBLOCK_BACKUP_DIR:-$HOME/freebuff-patch-backups}"
 # Where an AppImage is extracted to. One directory per Freebuff version, so an
