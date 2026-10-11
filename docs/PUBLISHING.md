@@ -28,7 +28,7 @@ gates the first submission.
 - [x] Small promo tile at **440×280** — `site/store-assets/promo-440x280.png`
 - [x] Marquee at **1400×560** (Chrome only, optional) — `site/store-assets/marquee-1400x560.png`
 - [x] Four screenshots at **1280×800** — `site/store-assets/screenshot-*.png`
-- [x] A privacy policy **URL** — <https://freebuff-adblocker.vercel.app/privacy>
+- [x] A privacy policy **URL** — <https://freebuff-focus-mode.vercel.app/privacy>
 - [ ] Publisher **contact email** — `workofma@gmail.com`, entered *and* verified in
       the store's own **Settings** page. Unverified, neither store will publish.
 
@@ -122,13 +122,13 @@ Free, but a separate account from Chrome. Same zip — no changes needed.
 4. **Availability** — Visibility **Public**, or **Hidden** to keep it out of
    search while still installable by link. Pick your markets.
 5. **Properties** — category, and any support/website links. Point the website
-   at <https://freebuff-adblocker.vercel.app/>.
+   at <https://freebuff-focus-mode.vercel.app/>.
 6. **Privacy** — this tab is mandatory and asks more than Chrome's:
    - state the extension's purpose
    - justify every permission
    - declare whether you use remote code (**no**)
    - certify data usage (**collects nothing**)
-   - **set a privacy policy URL** — <https://freebuff-adblocker.vercel.app/privacy>
+   - **set a privacy policy URL** — <https://freebuff-focus-mode.vercel.app/privacy>
 7. **Store listing** — per language: description, screenshots, promo tile.
 8. **Testing notes** — free text for the reviewer. Use one line: *no account
    needed; open freebuff.com and ads in the chat are hidden.*
