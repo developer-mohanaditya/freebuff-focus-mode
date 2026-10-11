@@ -270,6 +270,31 @@ strong {
   font-weight: 540;
 }
 
+/* A compact moral contract under the hero facts: when focus is fair game,
+   and the respect behind it. */
+.focus-contract {
+  margin-top: 24px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: 12px;
+  padding: 16px 18px;
+  background: var(--bg-raise);
+  font-size: 14.5px;
+  color: var(--muted);
+}
+
+.focus-contract strong {
+  color: var(--text);
+}
+
+.focus-contract p {
+  margin: 0 0 8px;
+}
+
+.focus-contract p:last-child {
+  margin-bottom: 0;
+}
+
 /* --------------------------------------------------------------- sections */
 
 .section {
