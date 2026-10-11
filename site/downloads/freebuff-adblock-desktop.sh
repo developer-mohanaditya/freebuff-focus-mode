@@ -57,7 +57,7 @@
 set -u
 
 # Stamped at build time (scripts/build-desktop.mjs).
-VERSION="1.4.2"
+VERSION="1.6.0"
 ORIGIN="https://freebuff-adblocker.vercel.app"
 
 BACKUP_DIR="${FREEBUFF_ADBLOCK_BACKUP_DIR:-$HOME/freebuff-patch-backups}"
