@@ -268,6 +268,20 @@ function writeDist(version, packageInfo, storeInfo, firefoxInfo, desktop) {
   const favicon = path.join(ICONS_DIR, 'icon128.png');
   if (fs.existsSync(favicon)) fs.copyFileSync(favicon, path.join(DIST_DIR, 'favicon.png'));
 
+  // Vercel Web Analytics for the static pages. The ESM bundle is self-contained
+  // (no imports), so it is vendored as va.js and loaded with a relative import.
+  // No CDN, no third-party script tag, and localhost never beacons (see the
+  // inline snippet in each page).
+  const vaSrc = path.join(ROOT, 'node_modules', '@vercel', 'analytics', 'dist', 'index.mjs');
+  if (!fs.existsSync(vaSrc)) {
+    throw new Error('node_modules/@vercel/analytics is missing - run npm install');
+  }
+  const va = fs
+    .readFileSync(vaSrc, 'utf8')
+    .replace(/\/\/# sourceMappingURL=.*$/, '')
+    .trim();
+  fs.writeFileSync(path.join(DIST_DIR, 'va.js'), `${va}\n`);
+
   fs.writeFileSync(
     path.join(DIST_DIR, 'version.json'),
     `${JSON.stringify(

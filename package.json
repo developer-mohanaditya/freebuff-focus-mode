@@ -17,5 +17,8 @@
     "test:linux": "node scripts/test-desktop-linux.mjs",
     "check": "node --check scripts/build.mjs && node --check scripts/build-desktop.mjs && node --check scripts/serve.mjs && node --check scripts/zip.mjs && node --check scripts/png.mjs && node --check scripts/store-assets.mjs && node --check scripts/validate.mjs && node --check scripts/desktop-fixtures.mjs && node --check scripts/test-desktop.mjs && node --check scripts/test-desktop-windows.mjs && node --check scripts/test-desktop-linux.mjs",
     "dev": "node scripts/dev.mjs"
+  },
+  "dependencies": {
+    "@vercel/analytics": "^2.0.1"
   }
 }
