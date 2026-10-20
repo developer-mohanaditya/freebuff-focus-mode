@@ -83,7 +83,7 @@ param(
 if ($null -eq $Arguments) { $Arguments = @() }
 
 # Stamped at build time (scripts/build-desktop.mjs).
-$Version = '1.8.0'
+$Version = '1.8.2'
 # The test suite points this at a file:// copy so update can be exercised without
 # the network. Nothing else sets it.
 $Origin = if ($env:FREEBUFF_FOCUS_ORIGIN) { $env:FREEBUFF_FOCUS_ORIGIN } else { 'https://freebuff-focusmode.vercel.app' }
@@ -136,6 +136,25 @@ $FocusArg = ''
 # is written only when the patch it describes actually succeeded.
 $script:FocusSeconds = $null
 $script:EndFocus = $false
+
+# What a focus run asked for, and where the patch it describes landed. Complete-
+# Focus runs at the end of install, which is what knows the target, so install
+# hands the three values over here rather than guessing them again.
+$script:FocusMode = ''
+$script:InstalledApp = ''
+$script:InstalledTarget = ''
+$script:InstalledVersion = ''
+$script:Interval = 1
+
+# Set only by __watch, the hidden command a timed or session focus starts. Not in
+# the command list and not in the help: nobody types these.
+$script:WatchRun = ''
+$script:WatchTarget = ''
+$script:WatchBackup = ''
+$script:WatchStamp = ''
+$script:WatchMode = ''
+$script:WatchPid = '0'
+$script:WatchEnds = '0'
 
 $script:IsWindowsOS = ($env:OS -eq 'Windows_NT')
 $script:UseColor = $false
@@ -211,7 +230,7 @@ while ($index -lt $Arguments.Count) {
 
   # The value either came glued on (`-App=C:\x`) or is the next argument.
   $value = $inline
-  if ($value -eq $null -and @('app', 'backupdir', 'timeout', 'sessiondir') -contains $key) {
+  if ($value -eq $null -and @('app', 'backupdir', 'timeout', 'sessiondir', 'interval', 'watchrun', 'watchtarget', 'watchbackup', 'watchstamp', 'watchmode', 'watchpid', 'watchends') -contains $key) {
     if ($index -lt $Arguments.Count) {
       $value = $Arguments[$index]
       $index++
@@ -233,6 +252,19 @@ while ($index -lt $Arguments.Count) {
     'help' { $Command = 'help' }
     'h' { $Command = 'help' }
     'version' { $Command = 'version' }
+    '__watch' { $Command = '__watch' }
+    'interval' {
+      if ("$value" -notmatch '^\d+$') { Die "-Interval needs a number of seconds, not '$value'" }
+      $script:Interval = [int]$value
+      if ($script:Interval -lt 1) { $script:Interval = 1 }
+    }
+    'watchrun' { $script:WatchRun = "$value" }
+    'watchtarget' { $script:WatchTarget = "$value" }
+    'watchbackup' { $script:WatchBackup = "$value" }
+    'watchstamp' { $script:WatchStamp = "$value" }
+    'watchmode' { $script:WatchMode = "$value" }
+    'watchpid' { $script:WatchPid = "$value" }
+    'watchends' { $script:WatchEnds = "$value" }
     'app' {
       if ([string]::IsNullOrWhiteSpace($value)) { Die '-App needs a path' }
       $App = $value
@@ -607,17 +639,21 @@ function Test-StalePatch {
 function ConvertTo-FocusSeconds {
   param([string] $Value)
 
-  $raw = '25m'
+  # No default: `focus` with no argument means "until unfocus", so guessing a
+  # duration here would contradict the reader. 25m, 90m, 2h, 45 and 45s all parse.
+  $raw = ''
   if (-not [string]::IsNullOrWhiteSpace($Value)) { $raw = $Value.Trim().ToLowerInvariant() }
+  if (-not $raw) { return $null }
 
-  $minutes = 0
-  if ($raw -match '^(\d+)m$') { $minutes = [int]$Matches[1] }
-  elseif ($raw -match '^(\d+)h$') { $minutes = [int]$Matches[1] * 60 }
-  elseif ($raw -match '^\d+$') { $minutes = [int]$raw }
+  $seconds = 0
+  if ($raw -match '^(\d+)s$') { $seconds = [int]$Matches[1] }
+  elseif ($raw -match '^(\d+)m$') { $seconds = [int]$Matches[1] * 60 }
+  elseif ($raw -match '^(\d+)h$') { $seconds = [int]$Matches[1] * 3600 }
+  elseif ($raw -match '^\d+$') { $seconds = [int]$raw * 60 }
   else { return $null }
 
-  if ($minutes -lt 1 -or $minutes -gt 1440) { return $null }
-  return $minutes * 60
+  if ($seconds -lt 5 -or $seconds -gt 86400) { return $null }
+  return $seconds
 }
 
 function Get-SessionPath {
@@ -638,51 +674,379 @@ function Get-SessionEnds {
   try { return [DateTimeOffset]::FromUnixTimeSeconds([int64]$text) } catch { return $null }
 }
 
+# --------------------------------------------------------- session state file
+#
+# One small key=value file, the same shape the macOS and Linux tools write, so a
+# session is legible with Get-Content:
+#
+#   mode      until-unfocus | until | session
+#   run       what identifies this focus: unfocus and a second focus use it
+#   target    the orchestrator.js this focus patched
+#   backup    the pristine copy to put back
+#   stamp     "length:ticks" of the patched file, so the watcher writes only
+#             while the bytes are still the ones the patch wrote
+#   endsAt    the deadline, for mode=until
+#   pid       the orchestrator this session waits on, for mode=session
+#   watcher   the watcher itself
+
+function Get-SessionKey {
+  param([string] $Key)
+  $path = Get-SessionPath
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+  $pattern = '^' + [regex]::Escape($Key) + '='
+  $line = @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue |
+    Where-Object { $_ -match $pattern } | Select-Object -First 1)
+  if ($line.Count -eq 0) { return $null }
+  return (("$($line[0])") -replace $pattern, '')
+}
+
+function Set-SessionKey {
+  param([string] $Key, [string] $Value, [string] $Token = '')
+  $path = Get-SessionPath
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+  if ($Token -and (Get-SessionKey 'run') -ne $Token) { return $false }
+
+  $pattern = '^' + [regex]::Escape($Key) + '='
+  $done = $false
+  $out = @()
+  foreach ($line in @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue)) {
+    if ($line -match $pattern) { $out += "$Key=$Value"; $done = $true }
+    else { $out += $line }
+  }
+  if (-not $done) { $out += "$Key=$Value" }
+  try {
+    [System.IO.File]::WriteAllText($path, (($out -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+  } catch { return $false }
+  return $true
+}
+
+# Length and last-write ticks: two cheap facts that together change for any edit a
+# Freebuff update or a fresh install would make.
+function Get-FileStamp {
+  param([string] $Path)
+  try {
+    $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+    return ("{0}:{1}" -f $item.Length, $item.LastWriteTimeUtc.Ticks)
+  } catch { return $null }
+}
+
+function Test-ProcessAlive {
+  param($ProcessId)
+  if (-not $ProcessId) { return $false }
+  if ("$ProcessId" -notmatch '^\d+$') { return $false }
+  try { return ($null -ne (Get-Process -Id ([int]$ProcessId) -ErrorAction Stop)) } catch { return $false }
+}
+
+function Get-NewestOrchestratorPid {
+  param([string] $AppDir, [string] $Target)
+  $best = $null
+  foreach ($entry in @(Get-OrchestratorProcesses -AppDir $AppDir -Target $Target)) {
+    if (-not $entry.Start) { continue }
+    if (-not $best -or $entry.Start -gt $best.Start) { $best = $entry }
+  }
+  if ($best) { return [int]$best.Id }
+  return 0
+}
+
+# The copy of this tool a watcher can run: the file on disk, or the installed one
+# when this run came through irm | iex and has no file behind it.
+function Get-SelfPath {
+  if ($HaveLocal -and $PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath -PathType Leaf)) {
+    return $PSCommandPath
+  }
+  if (Test-Path -LiteralPath $InstalledSelf -PathType Leaf) { return $InstalledSelf }
+  return $null
+}
+
+# Start-Process joins -ArgumentList with spaces and does not quote what it joins,
+# so any path with a space in it would split into two arguments. Every value below
+# is handed over already quoted, which the child's own parser unwraps.
+function Get-QuotedArg {
+  param([string] $Value)
+  return ('"' + $Value + '"')
+}
+
+# One detached PowerShell per timed or session focus. -WindowStyle Hidden keeps it
+# out of the way; -PassThru is the pid, so focus records it immediately rather than
+# waiting for the watcher to write its own.
+function Start-SessionWatcher {
+  $self = Get-SelfPath
+  if (-not $self) { return $false }
+  $hostExe = $null
+  try { $hostExe = (Get-Process -Id $PID).Path } catch { $hostExe = $null }
+  if (-not $hostExe) { try { $hostExe = Join-Path $PSHOME 'powershell.exe' } catch { $hostExe = $null } }
+  if (-not $hostExe) { return $false }
+
+  $run = Get-SessionKey 'run'
+  if (-not $run) { return $false }
+  $target = Get-SessionKey 'target'
+  $backup = Get-SessionKey 'backup'
+  $stamp = Get-SessionKey 'stamp'
+  $mode = Get-SessionKey 'mode'
+  $pidText = Get-SessionKey 'pid'; if (-not $pidText) { $pidText = '0' }
+  $endsText = Get-SessionKey 'endsAt'; if (-not $endsText) { $endsText = '0' }
+
+  $argv = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Get-QuotedArg $self), '__watch')
+  if ($script:InstalledApp) { $argv += @('-App', (Get-QuotedArg $script:InstalledApp)) }
+  $argv += @(
+    '-BackupDir', (Get-QuotedArg "$BackupDir"),
+    '-SessionDir', (Get-QuotedArg "$SessionDir"),
+    '-WatchRun', "$run",
+    '-WatchTarget', (Get-QuotedArg "$target"),
+    '-WatchBackup', (Get-QuotedArg "$backup"),
+    '-WatchStamp', "$stamp",
+    '-WatchMode', "$mode",
+    '-WatchPid', "$pidText",
+    '-WatchEnds', "$endsText",
+    '-Interval', "$($script:Interval)"
+  )
+
+  # -WindowStyle is Windows-only, and asking for it elsewhere is a hard error
+  # rather than a no-op, so it is only added on the platform that has it.
+  # Redirected, because a child that inherits this process's stdout keeps it open:
+  # the `focus` run it was started from would never see its own output end. The
+  # two files sit beside the session and are the only thing a watcher ever writes
+  # beyond its log line.
+  $startArgs = @{
+    FilePath               = $hostExe
+    ArgumentList           = $argv
+    PassThru               = $true
+    ErrorAction            = 'Stop'
+    RedirectStandardOutput = (Join-Path $SessionDir 'watch.out')
+    RedirectStandardError  = (Join-Path $SessionDir 'watch.err')
+  }
+  if ($script:IsWindowsOS) { $startArgs['WindowStyle'] = 'Hidden' }
+
+  try { $proc = Start-Process @startArgs }
+  catch { return $false }
+  if ($proc -and $proc.Id) { Set-SessionKey -Key 'watcher' -Value "$($proc.Id)" -Token "$run" | Out-Null }
+  return $true
+}
+
+# Stop a running watcher and give it a moment to be gone. unfocus and a second
+# focus both call this: two watchers on one session would race to restore the same
+# file. The session file going away is the other half - a watcher with no session
+# left exits on its next tick.
+function Stop-SessionWatcher {
+  $watcher = Get-SessionKey 'watcher'
+  if (-not $watcher -or "$watcher" -notmatch '^\d+$') { return }
+  try { Stop-Process -Id ([int]$watcher) -Force -ErrorAction Stop } catch { }
+  for ($i = 0; $i -lt 30; $i++) {
+    if (-not (Test-ProcessAlive $watcher)) { break }
+    Start-Sleep -Milliseconds 100
+  }
+}
+
+function Write-WatchLine {
+  param([string] $Text)
+  try {
+    Add-Content -LiteralPath "$(Get-SessionPath).log" -ErrorAction Stop `
+      -Value ("{0} {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Text)
+  } catch { }
+}
+
+# Put the pristine file back, but only if it is still the file the patch wrote.
+# Anything else means someone else has already changed it, and silence is the only
+# honest answer to that.
+function Complete-Watch {
+  param([string] $Reason)
+  $current = Get-FileStamp $script:WatchTarget
+  if ($current -ne $script:WatchStamp) {
+    Write-WatchLine "$Reason - left the file alone: it changed after the patch"
+  } elseif ($script:WatchBackup -and (Test-Path -LiteralPath $script:WatchBackup -PathType Leaf)) {
+    try {
+      Copy-Item -LiteralPath $script:WatchBackup -Destination $script:WatchTarget -Force -ErrorAction Stop
+      Write-WatchLine "$Reason - restored $($script:WatchTarget)"
+    } catch {
+      Write-WatchLine "$Reason - could not restore $($script:WatchTarget) (run: unfocus)"
+    }
+  }
+  if ((Get-SessionKey 'run') -eq $script:WatchRun) {
+    try { Remove-Item -LiteralPath (Get-SessionPath) -Force -ErrorAction Stop } catch { }
+  }
+}
+
+# The watcher. Started by focus, never typed: it waits for the one thing that ends
+# this focus, puts the pristine file back, and leaves.
+function Invoke-Watch {
+  $script:InstalledApp = $App
+  if (-not $script:WatchRun) { exit 0 }
+  if (-not $script:WatchTarget) { exit 0 }
+  if (-not (Test-Path -LiteralPath $script:WatchTarget -PathType Leaf)) { exit 0 }
+  if (-not (Set-SessionKey -Key 'watcher' -Value "$PID" -Token $script:WatchRun)) { exit 0 }
+
+  Write-WatchLine "watching $($script:WatchMode) pid $($script:WatchPid) - $($script:WatchTarget)"
+
+  while ($true) {
+    if ((Get-SessionKey 'run') -ne $script:WatchRun) {
+      Write-WatchLine 'standing down: the session was cleared or replaced'
+      exit 0
+    }
+
+    if ($script:WatchMode -eq 'session') {
+      if (-not $script:WatchPid -or $script:WatchPid -eq '0') {
+        $found = Get-NewestOrchestratorPid -AppDir $script:InstalledApp -Target $script:WatchTarget
+        if ($found) {
+          $script:WatchPid = "$found"
+          Set-SessionKey -Key 'pid' -Value "$found" -Token $script:WatchRun | Out-Null
+          Write-WatchLine "Freebuff opened, pid $found"
+        }
+      } elseif (-not (Test-ProcessAlive $script:WatchPid)) {
+        Complete-Watch 'Freebuff quit'
+        exit 0
+      }
+    } elseif ($script:WatchEnds -match '^\d+$') {
+      if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge [int64]$script:WatchEnds) {
+        Complete-Watch 'the deadline passed'
+        exit 0
+      }
+    }
+
+    Start-Sleep -Seconds $script:Interval
+  }
+}
+
+function Get-FocusMode {
+  if ([string]::IsNullOrWhiteSpace($FocusArg)) { return 'until-unfocus' }
+  if ($FocusArg.Trim() -match '^(?i)session$') { return 'session' }
+  return 'until'
+}
+
+# install, then record what should end it. The patch is the thing that hides ads;
+# the session file only says what will put it back, so a failed install is a
+# failed focus and nothing is recorded.
 function Complete-Focus {
-  if (-not $script:FocusSeconds) { return }
+  if (-not $script:FocusMode) { return }
+  if (-not $script:InstalledTarget) { return }
 
   try {
     if (-not (Test-Path -LiteralPath $SessionDir -PathType Container)) {
       New-Item -ItemType Directory -Path $SessionDir -Force | Out-Null
     }
-    $ends = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $script:FocusSeconds
-    $minutes = [int]($script:FocusSeconds / 60)
+  } catch { Die "cannot create $SessionDir" }
+
+  $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  $stamp = Get-FileStamp $script:InstalledTarget
+  $backup = Join-Path $BackupDir "orchestrator.js.$($script:InstalledVersion).orig"
+  $run = "$PID-$now"
+  $ends = 0
+  $watchedPid = '0'
+
+  if ($script:FocusMode -eq 'until') {
+    $ends = $now + $script:FocusSeconds
+  } elseif ($script:FocusMode -eq 'session') {
+    $watchedPid = "$(Get-NewestOrchestratorPid -AppDir $script:InstalledApp -Target $script:InstalledTarget)"
+  }
+
+  $lines = @(
+    "mode=$($script:FocusMode)",
+    "run=$run",
+    "started=$now",
+    "target=$($script:InstalledTarget)",
+    "backup=$backup",
+    "stamp=$stamp"
+  )
+  if ($ends -gt 0) {
+    $lines += "endsAt=$ends"
+    $lines += "duration=$($script:FocusSeconds)s"
+  }
+  if ($watchedPid -ne '0') { $lines += "pid=$watchedPid" }
+
+  try {
     [System.IO.File]::WriteAllText(
       (Get-SessionPath),
-      "endsAt=$ends`nduration=${minutes}m`n",
+      (($lines -join "`n") + "`n"),
       (New-Object System.Text.UTF8Encoding($false))
     )
   } catch {
     Die "cannot write $(Get-SessionPath): $($_.Exception.Message)"
   }
 
-  $clock = [DateTimeOffset]::FromUnixTimeSeconds($ends).ToLocalTime().ToString('HH:mm')
+  if ($script:FocusMode -ne 'until-unfocus') {
+    if (-not (Start-SessionWatcher)) { Warn "could not start the watcher - see $SessionDir" }
+  }
+
   Say ''
-  Say "Focus until $clock. Ads come back when you end it:"
-  Say "    $(Get-CommandName) unfocus"
-  Say 'There is no timer process. A session that runs out leaves the patch where'
-  Say 'it is until you run that, which is stated here rather than pretended away.'
+  switch ($script:FocusMode) {
+    'until-unfocus' {
+      Write-Piece 'Focus is on.' 'White'
+      Say ' Ads stay off until you end it:'
+      Say "    $(Get-CommandName) unfocus"
+      Say 'Nothing else ends this one - closing Freebuff and opening it again'
+      Say 'keeps the quiet, because the patched file is still on disk.'
+    }
+    'session' {
+      Write-Piece 'Focus for this session.' 'White'
+      Say ' Ads come back when you quit Freebuff:'
+      Say "    $(Get-CommandName) unfocus     (end it now, without quitting)"
+      if ($watchedPid -ne '0') {
+        Say "Watching pid $watchedPid. Quit Freebuff and open it again: the next"
+        Say 'launch reads the original file, so the ads are back with nothing to type.'
+      } else {
+        Say 'Freebuff is not open. The watcher starts when it is, and restores the'
+        Say 'file when it quits.'
+      }
+    }
+    default {
+      $clock = [DateTimeOffset]::FromUnixTimeSeconds($ends).ToLocalTime().ToString('HH:mm')
+      Write-Piece "Focus until $clock." 'White'
+      Say ' After that the ads come back on their own - the original file is'
+      Say 'restored at the deadline:'
+      Say "    $(Get-CommandName) unfocus     (end it now)"
+      Say 'A window that is open at the deadline keeps the code it started with,'
+      Say 'so it stays quiet until it restarts.'
+    }
+  }
 }
 
+# End any focus and take the session file with it, so a stale one cannot outlive
+# the patch it describes. The watcher is stopped first: nothing may be waiting to
+# write the file this run is restoring.
 function Complete-Unfocus {
-  if (-not $script:EndFocus) { return }
+  Stop-SessionWatcher
   $path = Get-SessionPath
   if (Test-Path -LiteralPath $path -PathType Leaf) {
     try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop } catch { }
   }
-  Say '  session  cleared'
+  if ($script:EndFocus) { Say '  focus    cleared' }
 }
 
+# One line in status: what kind of focus is on, and what will end it. Silent when
+# there is no session file at all, because most runs have nothing to say.
 function Show-SessionLine {
-  $ends = Get-SessionEnds
-  if (-not $ends) { return }
+  $path = Get-SessionPath
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return }
 
-  $clock = $ends.ToLocalTime().ToString('HH:mm')
-  if ($ends -gt [DateTimeOffset]::Now) {
-    $left = [int][Math]::Ceiling(($ends - [DateTimeOffset]::Now).TotalMinutes)
-    Say "  focus    on until $clock ($left min left)"
-  } else {
-    Say "  focus    session ended at $clock - run: freebuff-focus.ps1 unfocus"
+  $mode = Get-SessionKey 'mode'
+  if (-not $mode) { if (Get-SessionEnds) { $mode = 'until' } else { $mode = 'until-unfocus' } }
+
+  switch ($mode) {
+    'until-unfocus' {
+      Say "  focus    on - until you run: $(Get-CommandName) unfocus"
+    }
+    'session' {
+      $watched = Get-SessionKey 'pid'
+      if (-not $watched) {
+        Say '  focus    on - until Freebuff quits (waiting for it to open)'
+      } elseif (Test-ProcessAlive $watched) {
+        Say "  focus    on - until Freebuff quits (pid $watched)"
+      } else {
+        Say '  focus    ended with Freebuff - ads are back on the next launch'
+        Say "           run: $(Get-CommandName) unfocus   (to restore it now)"
+      }
+    }
+    default {
+      $ends = Get-SessionEnds
+      if (-not $ends) { Say "  focus    on - until you run: $(Get-CommandName) unfocus"; return }
+      $clock = $ends.ToLocalTime().ToString('HH:mm')
+      if ($ends -gt [DateTimeOffset]::Now) {
+        $left = [int][Math]::Ceiling(($ends - [DateTimeOffset]::Now).TotalMinutes)
+        Say "  focus    on until $clock ($left min left)"
+      } else {
+        Say "  focus    deadline passed at $clock - ads are back on the next launch"
+        Say "           run: $(Get-CommandName) unfocus   (to restore it now)"
+      }
+    }
   }
 }
 
@@ -985,9 +1349,11 @@ function Show-Report {
 function Show-NextSteps {
   Write-Piece '  What this tool can do' 'White'
   Write-Host ''
-  Say '  status        what is applied, and any session - changes nothing'
-  Say '  focus 25m     start a session: 25m, 90m, 2h, or plain minutes'
-  Say '  unfocus       end the session and bring the ads back'
+  Say '  status        what is applied, and any focus - changes nothing'
+  Say '  focus         quiet until you run unfocus'
+  Say '  focus 25m     quiet until a deadline: 25m, 90m, 2h, 45s'
+  Say '  focus session quiet until Freebuff quits'
+  Say '  unfocus       end it now and bring the ads back'
   Say '  verify        wait for a relaunch, then check what it loaded'
   Say '  scan          every anchor this build contains - read-only'
   Say '  revert        restore the pristine backup'
@@ -1328,9 +1694,11 @@ function Show-Help {
   Say ''
   Say 'commands'
   Say '  install   patch the app (default; backs up first, then restarts it)'
-  Say '  focus     install, then keep a session for a while (default 25m)'
-  Say '  unfocus   end the session: restore the pristine backup'
-  Say '  status    report what is applied, and any session - changes nothing'
+  Say '  focus     quiet until you run unfocus (no timer, no watcher)'
+  Say '  focus 25m quiet until a deadline: 25m, 90m, 2h, 45s'
+  Say '  focus session  quiet until Freebuff quits'
+  Say '  unfocus   end it now: restore the pristine backup'
+  Say '  status    report what is applied, and any focus - changes nothing'
   Say '  verify    wait for Freebuff to be relaunched, then check what it loaded'
   Say '  scan      show every anchor this build has - changes nothing'
   Say '  revert    restore the pristine backup'
@@ -1353,10 +1721,20 @@ function Show-Help {
   Say "  -AddPath           setup: append $BinDir to your user PATH"
   Say '  -Force             update: reinstall even when the version matches'
   Say ''
-  Say 'A focus session is a timestamp on disk, not a process. It is 25m, 90m, 2h'
-  Say 'or a plain number of minutes, and it does nothing on its own: unfocus'
-  Say 'restores the ads, and a session that runs out leaves the patch in place'
-  Say 'until you do.'
+  Say 'A focus has three modes, and only what ends it differs:'
+  Say '  focus          nothing but unfocus. Closing and reopening Freebuff keeps'
+  Say '                 the ads off - the patched file is still on disk.'
+  Say '  focus 25m      a deadline. A watcher restores the original file when it'
+  Say '                 passes, so the next start of Freebuff has ads again. A'
+  Say '                 window that is already open keeps the code it started with'
+  Say '                 until it restarts - nothing here restarts it for you.'
+  Say '  focus session  quitting Freebuff. The watcher restores the file as the app'
+  Say '                 exits, so reopening it later shows ads.'
+  Say ''
+  Say 'The watcher is one hidden PowerShell process per timed or session focus - the'
+  Say 'only thing this tool leaves running. It writes only while the file is still'
+  Say 'the one the patch wrote, so a Freebuff update in the meantime makes it stand'
+  Say 'down instead of overwriting. unfocus stops it.'
   Say ''
   Say 'A patch on disk is not the same as a patch in effect: the orchestrator is'
   Say 'read once at launch. verify waits for the relaunch and reports the two times'
@@ -1632,6 +2010,12 @@ function Invoke-Install {
   $target = Get-RequiredTarget $appDir
   $appVersion = Get-AppVersion $appDir
 
+  # What Complete-Focus needs to record a focus, since it runs at the end of this
+  # function and the app is what this function resolved.
+  $script:InstalledApp = $appDir
+  $script:InstalledTarget = $target
+  $script:InstalledVersion = $appVersion
+
   Say "Freebuff Focus - desktop tool $Version"
   Say "  app      $appDir"
   Say "  freebuff $appVersion (installed)"
@@ -1665,8 +2049,8 @@ function Invoke-Install {
     Say ' Every anchor in this build is already replaced.'
     Show-Report $result
     Show-SessionLine
-    if (-not (Get-SessionEnds)) {
-      Say '  session  none - ads stay off until you revert'
+    if (-not (Test-Path -LiteralPath (Get-SessionPath) -PathType Leaf)) {
+      Say '  focus    none - ads stay off until you revert'
     }
     Say ''
 
@@ -1784,6 +2168,17 @@ function Invoke-Install {
   Ok "patched Freebuff $appVersion"
   Write-Host ('-' * 44)
 
+  # A fresh write means any recorded session describes the old bytes. The watcher
+  # that was waiting on them has to go before it restores the wrong thing, and a
+  # session nobody is watching is worse than no session at all.
+  if ((Test-Path -LiteralPath (Get-SessionPath) -PathType Leaf) -and
+      ((Get-SessionKey 'stamp') -ne (Get-FileStamp $target))) {
+    Stop-SessionWatcher
+    try { Remove-Item -LiteralPath (Get-SessionPath) -Force -ErrorAction Stop } catch { }
+    Say '  focus    cleared - the patch was rewritten'
+    Say ''
+  }
+
   $running = @(Get-OrchestratorProcesses -AppDir $appDir -Target $target).Count -gt 0
 
   if ($Restart -eq 'never') {
@@ -1840,6 +2235,8 @@ function Invoke-Install {
 }
 
 function Invoke-Revert {
+  # Nothing may be waiting to write this file once it is being restored.
+  Stop-SessionWatcher
   $appDir = Get-RequiredApp
   $target = Get-RequiredTarget $appDir
   $appVersion = Get-AppVersion $appDir
@@ -2146,14 +2543,27 @@ function Wait-ForRelaunch {
 # ------------------------------------------------------------------------ run
 
 function Invoke-Focus {
-  $seconds = ConvertTo-FocusSeconds $FocusArg
-  if (-not $seconds) { Die 'focus needs a duration like 25m, 90m, 2h or 45 (minutes)' }
-  $script:FocusSeconds = $seconds
+  $script:FocusMode = Get-FocusMode
+  $script:FocusSeconds = $null
+  if ($script:FocusMode -eq 'until') {
+    $seconds = ConvertTo-FocusSeconds $FocusArg
+    if (-not $seconds) {
+      Die 'focus takes a duration like 25m, 90m, 2h or 45s, or the word session'
+    }
+    $script:FocusSeconds = $seconds
+  }
+
+  # A second focus replaces the first: one session file, one watcher.
+  Stop-SessionWatcher
+
+  # Install first: it is what patches, and a piped run installs the copy the
+  # watcher will re-run. Complete-Focus runs at the end of it with the target.
   Invoke-Install
 }
 
 function Invoke-Unfocus {
   $script:EndFocus = $true
+  Stop-SessionWatcher
   Invoke-Revert
 }
 
@@ -2164,6 +2574,7 @@ switch ($Command) {
   'uninstall' { Invoke-Uninstall }
   'focus' { Invoke-Focus }
   'unfocus' { Invoke-Unfocus }
+  '__watch' { Invoke-Watch }
   'status' { Invoke-Status }
   'verify' { Invoke-Verify }
   'revert' { Invoke-Revert }

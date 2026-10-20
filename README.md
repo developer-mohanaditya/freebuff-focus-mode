@@ -38,15 +38,17 @@ patches the app in one go - after that, curl is not needed again.
 ```sh
 # macOS / Linux
 curl -fsSL https://freebuff-focusmode.vercel.app/downloads/freebuff-focus-desktop.sh | sh
-freebuff-focusmode focus 25m   # quiet for the work block
-freebuff-focusmode unfocus     # bring ads back after
-freebuff-focusmode update      # newer tool: download it, replace the copy, patch again
+freebuff-focusmode focus          # quiet until you end it
+freebuff-focusmode focus 25m      # quiet until the deadline, then restored
+freebuff-focusmode focus session  # quiet until Freebuff quits
+freebuff-focusmode unfocus        # bring ads back now
+freebuff-focusmode update         # newer tool: download it, replace the copy, patch again
 ```
 
 ```powershell
 # Windows
 irm https://freebuff-focusmode.vercel.app/downloads/freebuff-focus-desktop.ps1 | iex
-freebuff-focusmode focus 25m
+freebuff-focusmode focus session
 ```
 
 The installer prints the one line to add if `~/.local/bin` (or
@@ -57,8 +59,20 @@ removes the undo.
 
 The tool restarts Freebuff itself, then checks that the running process read the patched
 file. Every Freebuff update replaces the patched files, so run `install` again after an
-update. A session is the patch plus an end time: `status` prints when it lifts, and nothing
-runs in the background - `unfocus` is what puts the ads back.
+update.
+
+A focus is the patch plus something that ends it, and there are three:
+
+| command | ads come back when |
+| --- | --- |
+| `focus` | you run `unfocus` |
+| `focus 25m` | the deadline passes - a watcher restores the original file |
+| `focus session` | Freebuff quits - the next launch has ads again |
+
+Only the timed and session forms leave a process behind: one detached watcher per focus,
+which restores the file, writes one line to `session.log` beside the session file, and
+exits. It writes nothing at all if the file changed since the patch, so a Freebuff update
+makes it stand down instead of overwriting. `unfocus` stops it.
 
 ## How it works
 

@@ -1,6 +1,6 @@
 {
   "name": "freebuff-focus-mode",
-  "version": "1.8.0",
+  "version": "1.8.2",
   "private": true,
   "type": "module",
   "description": "Focus sessions for freebuff.com: quiet ad slots while you work, restore them after. Extension plus desktop companion.",

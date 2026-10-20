@@ -50,8 +50,10 @@ folder to your PATH if it is not there already. `setup --add-path` edits your
 shell rc instead of telling you to. After that:
 
   freebuff-focusmode status     report what is applied - changes nothing
-  freebuff-focusmode focus 25m  start a session
-  freebuff-focusmode unfocus    end it, and bring the ads back
+  freebuff-focusmode focus      keep the ads off until you end it
+  freebuff-focusmode focus 25m  keep them off until the deadline
+  freebuff-focusmode focus session  keep them off until Freebuff quits
+  freebuff-focusmode unfocus    end it now, and bring the ads back
   freebuff-focusmode update     fetch a newer tool, replace this copy, patch again
   freebuff-focusmode uninstall  remove the command; the patch stays
 
@@ -69,21 +71,36 @@ OTHER COMMANDS
   sh freebuff-focus.sh doctor    environment report, for a bug report
 
 
-FOCUS SESSIONS
---------------
+FOCUS
+-----
 
-A session is the patch plus an end time. It is the same install, so it is the
-same reversibility:
+Three ways to ask, and only what ends them differs:
 
-  sh freebuff-focus.sh focus 25m    install, and remember that you meant 25m
-  sh freebuff-focus.sh status       shows "focus on until 14:20" while it lasts
-  sh freebuff-focus.sh unfocus      restore the original, and clear the session
+  sh freebuff-focus.sh focus          quiet until you run unfocus
+  sh freebuff-focus.sh focus 25m      quiet until the deadline
+  sh freebuff-focus.sh focus session  quiet until Freebuff quits
 
-25m is the default, and 90m, 2h and a plain number of minutes all parse. There
-is no timer process: the timestamp is a file, status reads it, and a session
-that runs out leaves the patch where it is until you run unfocus. That is
-stated rather than hidden, because a background job that could revert a patch
-is a background job that could revert one at the wrong time.
+All three patch the app first, so a failed install is a failed focus and nothing
+is recorded.
+
+A plain `focus` writes no deadline. Closing Freebuff and opening it again keeps
+the ads off, because the patched file is still on disk; only `unfocus` restores
+it.
+
+`focus 25m` - or 90m, 2h, 45, 45s - starts one small watcher, a detached `sh`,
+that restores the original file when the deadline passes. The next start of
+Freebuff reads ads-on code again, with nothing to type. A window that is open at
+the deadline keeps the code it started with, so it stays quiet until it
+restarts; nothing here restarts it for you.
+
+`focus session` starts the same watcher, waiting on Freebuff itself: when the
+orchestrator process exits, the original file goes back, so the next launch has
+ads. That is the one for "quiet while I work, ads back next time".
+
+The watcher is the only thing this tool leaves running. It writes nothing at all
+if the file changed since the patch - a Freebuff update or a fresh install makes
+it stand down rather than overwrite. `unfocus` stops it, and so does a second
+`focus`. `status` says which mode is on and what will end it.
 
 AFTER A FREEBUFF UPDATE
 -----------------------

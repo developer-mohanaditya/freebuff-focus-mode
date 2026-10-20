@@ -47,7 +47,14 @@ const TOOL_SOURCE = fs.readFileSync(TOOL, 'utf8');
  * refuses a copy older than the code that is running - and the source's
  * placeholder version compares as older than any real one.
  */
-const FIXTURE_VERSION = '1.8.0';
+const FIXTURE_VERSION = JSON.parse(
+  fs.readFileSync(path.join(ROOT, 'extension', 'manifest.json'), 'utf8')
+).version;
+/** The next patch release, served by the fake origin so `update` has something to do. */
+const NEXT_VERSION = (() => {
+  const [major, minor, patch] = FIXTURE_VERSION.split('.');
+  return `${major}.${minor}.${Number(patch) + 1}`;
+})();
 const STAMPED_SOURCE = TOOL_SOURCE.replaceAll('__FBD_VERSION__', FIXTURE_VERSION).replaceAll(
   '__FBD_ORIGIN__',
   'https://focus.test'
@@ -222,7 +229,7 @@ check('it reports already patched', /Already patched/.test(again.stdout));
 // in place, whether a session is running, what the tool can do next, and - for a
 // curl run - how to get a copy of the script to run those commands with.
 check('it lists the anchors already in place', /render\s+applied/.test(again.stdout) && /request\s+applied/.test(again.stdout));
-check('it says there is no session', /session\s+none/.test(again.stdout));
+check('it says there is no focus', /focus\s+none/.test(again.stdout));
 check('it prints the commands the tool has', ['status', 'focus 25m', 'unfocus', 'verify', 'scan', 'revert', 'doctor', 'help'].every((c) => again.stdout.includes(c)));
 check('the local run does not tell you to download the script', /No local copy/.test(again.stdout), false);
 
@@ -542,32 +549,137 @@ check('--no-restart still patches', count(read(quiet.target), '/*FBD-ADS-OFF:ren
 check('and it asks the reader to quit and reopen', /Open Freebuff\./.test(quietRun.stdout));
 check('and it never claims a restart', /restarted Freebuff/.test(quietRun.stdout), false);
 
-console.log('\nfocus sessions');
+/* ------------------------------------------------------------------- focus */
+
+/**
+ * The three modes, and the process that ends two of them.
+ *
+ * `focus` on its own must promise nothing but `unfocus` - it used to default to
+ * 25m and print a deadline the patch never honoured. A timed focus and a session
+ * focus both leave one detached watcher, and what ends them differs: a clock, or
+ * the app quitting. The fake orchestrator below is the same shape the tool looks
+ * for - a process whose command line ends with the orchestrator path - so the
+ * checks drive the real pgrep/ps path rather than a stub.
+ */
+
+// A real await, not a busy sleep: node reaps its children on the event loop, and
+// a killed child that has not been reaped is still a live pid to `kill -0` -
+// which is exactly what the watcher waits on. Sleeping with Atomics here would
+// leave the fake app looking alive and fail a check the tool gets right.
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sessionKeys = (file) =>
+  Object.fromEntries(read(file).trim().split('\n').filter((l) => l.includes('=')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+
+console.log('\nfocus: until you end it');
 const s = makeBundle();
 const sessionDir = path.join(s.root, 'session-state');
-const focused = run(s.app, s.backups, 'focus', '1m', '--session-dir', sessionDir);
-check('focus exits 0', focused.status, 0);
-check('it names the time the session ends', /Focus until \d\d:\d\d/.test(focused.stdout));
-check('the patch went in', count(read(s.target), '/*FBD-ADS-OFF:render*/'), 1);
-
 const sessionFile = path.join(sessionDir, 'session');
+const sessionLog = path.join(sessionDir, 'session.log');
+
+const plain = run(s.app, s.backups, 'focus', '--session-dir', sessionDir);
+check('focus with no duration exits 0', plain.status, 0);
+check('it names no deadline', /Ads stay off until you end it/.test(plain.stdout));
+check('and nothing else as the end of it', /Nothing else ends this one/.test(plain.stdout));
+check('the patch went in', count(read(s.target), '/*FBD-ADS-OFF:render*/'), 1);
 check('a session file is written', fs.existsSync(sessionFile));
-check('it carries an end time', /^endsAt=\d+$/m.test(read(sessionFile)));
+check('the mode is until-unfocus', sessionKeys(sessionFile).mode, 'until-unfocus');
+check('there is no end time', 'endsAt' in sessionKeys(sessionFile), false);
+check('and nothing is left running', fs.existsSync(sessionLog), false);
 check('nothing else is left in that folder', fs.readdirSync(sessionDir).length, 1);
 
-const withSession = run(s.app, s.backups, 'status', '--session-dir', sessionDir);
-check('status reports the session', /focus\s+on until \d\d:\d\d/.test(withSession.stdout));
-check('and still reports the patch', /Ads are off/.test(withSession.stdout));
+const plainStatus = run(s.app, s.backups, 'status', '--session-dir', sessionDir);
+check('status says only unfocus ends it', /focus\s+on - until you run/.test(plainStatus.stdout));
+check('and still reports the patch', /Ads are off/.test(plainStatus.stdout));
 
 const ended = run(s.app, s.backups, 'unfocus', '--session-dir', sessionDir);
 check('unfocus exits 0', ended.status, 0);
 check('it restores the original bytes', read(s.target) === CURRENT);
 check('it clears the session file', fs.existsSync(sessionFile), false);
+check('and says so', /focus\s+cleared/.test(ended.stdout));
 
 const badDuration = run(s.app, s.backups, 'focus', 'soon', '--session-dir', sessionDir);
 check('a duration that is not a duration is refused', badDuration.status !== 0);
 check('and it says what one looks like', /duration like 25m/.test(`${badDuration.stdout}${badDuration.stderr}`));
 check('and nothing is patched', read(s.target) === CURRENT);
+
+console.log('\nfocus 5s: restored at the deadline');
+run(s.app, s.backups, 'install', '--session-dir', sessionDir, '--no-wait');
+const timed = run(s.app, s.backups, 'focus', '5s', '--session-dir', sessionDir);
+check('a timed focus exits 0', timed.status, 0);
+check('it names the time it ends', /Focus until \d\d:\d\d/.test(timed.stdout));
+check('the mode is until', sessionKeys(sessionFile).mode, 'until');
+check('it carries an end time', /^endsAt=\d+$/m.test(read(sessionFile)));
+await wait(600);
+const timedKeys = sessionKeys(sessionFile);
+check('a watcher records its own pid', Number(timedKeys.watcher) > 0);
+check('and the file it wrote', /^\d+:\d+$/.test(timedKeys.stamp));
+await wait(6500);
+check('the deadline restores the original bytes', read(s.target) === CURRENT);
+check('and the session file goes with it', fs.existsSync(sessionFile), false);
+check('the log says why', /the deadline passed - restored/.test(read(sessionLog)));
+
+console.log('\nfocus session: restored when the app quits');
+run(s.app, s.backups, 'install', '--session-dir', sessionDir, '--no-wait');
+// The app is open and already running the patched file, which is the state a
+// session focus is asked for in.
+const fake = spawn('sh', ['-c', 'sleep 120', s.target], { stdio: 'ignore' });
+await wait(300);
+const sess = run(s.app, s.backups, 'focus', 'session', '--session-dir', sessionDir);
+check('session focus exits 0', sess.status, 0);
+check('it says the ads come back when Freebuff quits', /Ads come back when you quit Freebuff/.test(sess.stdout));
+check('the mode is session', sessionKeys(sessionFile).mode, 'session');
+check('it watches the running app', Number(sessionKeys(sessionFile).pid), fake.pid);
+await wait(600);
+check('a watcher records its own pid', Number(sessionKeys(sessionFile).watcher) > 0);
+const sessionStatus = run(s.app, s.backups, 'status', '--session-dir', sessionDir);
+check('status names the pid it is waiting on', new RegExp(`until Freebuff quits \\(pid ${fake.pid}\\)`).test(sessionStatus.stdout));
+
+fake.kill('SIGKILL');
+await wait(2500);
+check('quitting the app restores the original bytes', read(s.target) === CURRENT);
+check('and clears the session', fs.existsSync(sessionFile), false);
+check('the log names the quit', /Freebuff quit - restored/.test(read(sessionLog)));
+
+console.log('\nthe watcher stands down when the file moves under it');
+run(s.app, s.backups, 'install', '--session-dir', sessionDir, '--no-wait');
+const fake2 = spawn('sh', ['-c', 'sleep 120', s.target], { stdio: 'ignore' });
+await wait(300);
+run(s.app, s.backups, 'focus', 'session', '--session-dir', sessionDir);
+await wait(600);
+// What a Freebuff update looks like from here: the bytes the patch wrote are
+// replaced by someone else while the session is still on.
+fs.appendFileSync(s.target, '\n/* replaced by an update */\n');
+fake2.kill('SIGKILL');
+await wait(2500);
+check('a file that changed after the patch is left alone', read(s.target).includes('replaced by an update'));
+check('the watcher says why it did nothing', /left the file alone: it changed after the patch/.test(read(sessionLog)));
+check('and the session is over anyway', fs.existsSync(sessionFile), false);
+
+console.log('\nunfocus and a second focus stop the watcher');
+run(s.app, s.backups, 'install', '--session-dir', sessionDir, '--no-wait');
+const fake3 = spawn('sh', ['-c', 'sleep 120', s.target], { stdio: 'ignore' });
+await wait(300);
+run(s.app, s.backups, 'focus', 'session', '--session-dir', sessionDir);
+await wait(600);
+const firstWatcher = Number(sessionKeys(sessionFile).watcher);
+const stopped = run(s.app, s.backups, 'unfocus', '--session-dir', sessionDir);
+check('unfocus exits 0', stopped.status, 0);
+check('it restores the original bytes', read(s.target) === CURRENT);
+const alive = (pid) => {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+};
+check('and stops the watcher', alive(firstWatcher), false);
+
+run(s.app, s.backups, 'focus', 'session', '--session-dir', sessionDir);
+await wait(600);
+const secondWatcher = Number(sessionKeys(sessionFile).watcher);
+run(s.app, s.backups, 'focus', 'session', '--session-dir', sessionDir);
+await wait(600);
+const thirdWatcher = Number(sessionKeys(sessionFile).watcher);
+check('a second focus replaces the first watcher', secondWatcher !== thirdWatcher);
+check('and the one it replaced is gone', alive(secondWatcher), false);
+run(s.app, s.backups, 'unfocus', '--session-dir', sessionDir);
+fake3.kill('SIGKILL');
 
 /* ------------------------------------------------------- the installed command */
 
@@ -592,7 +704,7 @@ check('setup again is not an error', runStamped(inst.app, inst.backups, 'setup')
 
 const viaCommand = runCommand(inst, 'version');
 check('the command runs the tool', viaCommand.status, 0);
-check('and reports the tool version', /freebuff-focus-desktop 1\.8\.0/.test(viaCommand.stdout));
+check('and reports the tool version', viaCommand.stdout.includes(`freebuff-focus-desktop ${FIXTURE_VERSION}`));
 const commandStatus = runCommand(inst, 'status', '--app', inst.app, '--backup-dir', inst.backups);
 check('arguments reach the tool through the command', /Not patched yet/.test(commandStatus.stdout));
 
@@ -613,11 +725,11 @@ check('and only once, however often setup runs', count(read(rc), '# freebuff-foc
 
 const fresh = makeBundle();
 runStamped(fresh.app, fresh.backups, 'setup');
-makeOrigin(fresh.root, '1.8.1');
+makeOrigin(fresh.root, NEXT_VERSION);
 const updated = runCommand(fresh, 'update', '--app', fresh.app, '--backup-dir', fresh.backups);
 check('update exits 0', updated.status, 0);
-check('it names both versions', /1\.8\.0 -> 1\.8\.1/.test(updated.stdout));
-check('the installed copy is the new one', /VERSION="1\.8\.1"/.test(read(path.join(fresh.home, 'freebuff-focus.sh'))));
+check('it names both versions', updated.stdout.includes(`${FIXTURE_VERSION} -> ${NEXT_VERSION}`));
+check('the installed copy is the new one', read(path.join(fresh.home, 'freebuff-focus.sh')).includes(`VERSION="${NEXT_VERSION}"`));
 check('the copy it replaced is kept', fs.existsSync(path.join(fresh.home, 'freebuff-focus.sh.prev')));
 // The patch step is the new copy's, with the paths this run was given: the
 // handover must not fall back to guessing where Freebuff is.
@@ -632,7 +744,7 @@ makeOrigin(fresh.root, '1.7.9');
 const older = runCommand(fresh, 'update');
 check('an older served copy is refused', older.status !== 0);
 check('and it says which way round they are', /older than the installed/.test(older.stderr));
-check('and the installed copy is untouched', /VERSION="1\.8\.1"/.test(read(path.join(fresh.home, 'freebuff-focus.sh'))));
+check('and the installed copy is untouched', read(path.join(fresh.home, 'freebuff-focus.sh')).includes(`VERSION="${NEXT_VERSION}"`));
 
 const removed = runCommand(fresh, 'uninstall');
 check('uninstall exits 0', removed.status, 0);
