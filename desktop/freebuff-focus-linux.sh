@@ -387,7 +387,7 @@ show_app() {
   else
     say "  app      $APP_TREE"
   fi
-  say "  version  $APP_VERSION"
+  say "  freebuff $APP_VERSION (installed)"
   say "  target   $APP_TREE/resources/orchestrator/orchestrator.js"
 }
 
@@ -1457,7 +1457,7 @@ cmd_doctor() {
   else
     tree="$path"
     say "  app           $path"
-    say "  app version   $(tree_version "$path")"
+    say "  app version   $(tree_version "$path")  (Freebuff.desktop)"
     say "  ${DIM}(an AppDir or an install directory - patched in place)${OFF}"
   fi
   say ""

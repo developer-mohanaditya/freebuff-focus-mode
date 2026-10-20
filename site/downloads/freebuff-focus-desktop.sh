@@ -873,7 +873,7 @@ cmd_status() {
   version="$(app_version "$app")"
   say "${B}Freebuff Focus${OFF} - desktop tool $VERSION"
   say "  app      $app"
-  say "  version  $version"
+  say "  freebuff $version (installed)"
   say "  target   $target"
   session_line
   say ""
@@ -919,7 +919,7 @@ cmd_install() {
 
   say "${B}Freebuff Focus${OFF} - desktop tool $VERSION"
   say "  app      $app"
-  say "  version  $version"
+  say "  freebuff $version (installed)"
   say ""
 
   report="$(engine check "$target" "$DEEP")" || true
@@ -1150,7 +1150,10 @@ cmd_doctor() {
   if app="$(find_app)"; then
     target="$app/Contents/Resources/orchestrator/orchestrator.js"
     say "  app           $app"
-    say "  version       $(app_version "$app")"
+    # The app's own version, read from the bundle it would patch - not a constant
+    # and not what the tool was built against. The source is named because the
+    # label alone used to read as the tool's version.
+    say "  freebuff      $(app_version "$app")   (Contents/Info.plist)"
     say "  orchestrator  $target"
     if [ -f "$target" ]; then
       say "  size          $(wc -c < "$target" | tr -d ' ') bytes"
@@ -1187,7 +1190,7 @@ cmd_scan() {
 
   say "${B}Freebuff Focus${OFF} - anchor scan (tool $VERSION)"
   say "  app      $app"
-  say "  version  $version"
+  say "  freebuff $version (installed)"
   say "  target   $target"
   say ""
 
@@ -1219,7 +1222,7 @@ cmd_verify() {
   version="$(app_version "$app")"
   say "${B}Freebuff Focus${OFF} - desktop tool $VERSION"
   say "  app      $app"
-  say "  version  $version"
+  say "  freebuff $version (installed)"
   say "  target   $target"
   say ""
 

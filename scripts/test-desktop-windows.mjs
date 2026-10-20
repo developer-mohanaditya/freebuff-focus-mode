@@ -163,6 +163,9 @@ check('version prints the tool version', /^freebuff-focus-desktop \S+$/m.test(ru
 console.log('\ninstall');
 const install = run(a.app, a.backups, 'install');
 check('install exits 0', install.status, 0);
+// The header names whose version it is printing. A fixture install has no exe
+// version resource, so the value is "unknown" - the label is what is under test.
+check('the header credits the installed app for the version', /freebuff\s+\S+ \(installed\)/.test(install.stdout));
 
 const patched = read(a.target);
 check('the one render gate is neutralised', count(patched, 'if (true/*FBD-ADS-OFF:render*/)'), 1);

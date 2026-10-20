@@ -1365,7 +1365,7 @@ function Invoke-Status {
 
   Say "Freebuff Focus - desktop tool $Version"
   Say "  app      $appDir"
-  Say "  version  $appVersion"
+  Say "  freebuff $appVersion (installed)"
   Say "  target   $target"
   Say ''
 
@@ -1410,7 +1410,7 @@ function Invoke-Install {
 
   Say "Freebuff Focus - desktop tool $Version"
   Say "  app      $appDir"
-  Say "  version  $appVersion"
+  Say "  freebuff $appVersion (installed)"
   Say ''
 
   $result = Invoke-Engine -Mode check -Target $target -DeepScan $Deep
@@ -1701,7 +1701,10 @@ function Invoke-Doctor {
   $target = Get-TargetPath $appDir
   $appVersion = Get-AppVersion $appDir
   Say "  app           $appDir"
-  Say "  version       $appVersion"
+  # The app's own version, read from the executable it would patch - not a
+  # constant and not what the tool was built against. The source is named
+  # because the label alone used to read as the tool's version.
+  Say "  freebuff      $appVersion   (Freebuff.exe version resource)"
   Say "  orchestrator  $target"
 
   if (Test-Path -LiteralPath $target -PathType Leaf) {
@@ -1732,7 +1735,7 @@ function Invoke-Scan {
 
   Say "Freebuff Focus - anchor scan (tool $Version)"
   Say "  app      $appDir"
-  Say "  version  $appVersion"
+  Say "  freebuff $appVersion (installed)"
   Say "  target   $target"
   Say ''
 
@@ -1772,7 +1775,7 @@ function Invoke-Verify {
 
   Say "Freebuff Focus - desktop tool $Version"
   Say "  app      $appDir"
-  Say "  version  $appVersion"
+  Say "  freebuff $appVersion (installed)"
   Say "  target   $target"
   Say ''
 
