@@ -84,11 +84,25 @@ if ($null -eq $Arguments) { $Arguments = @() }
 
 # Stamped at build time (scripts/build-desktop.mjs).
 $Version = '__FBD_VERSION__'
-$Origin = '__FBD_ORIGIN__'
+# The test suite points this at a file:// copy so update can be exercised without
+# the network. Nothing else sets it.
+$Origin = if ($env:FREEBUFF_FOCUS_ORIGIN) { $env:FREEBUFF_FOCUS_ORIGIN } else { '__FBD_ORIGIN__' }
 
 # Whether this run has the script on disk. `irm ... | iex` does not, so a hint
 # that says `.\freebuff-focus.ps1 status` would point at a file that is not there.
 $HaveLocal = [bool]$PSCommandPath
+
+# Where the tool installs itself, and the command that runs it. Windows has no
+# ~/.local/bin to agree on, so the folder is named and its bin sits inside it.
+if ($env:LOCALAPPDATA) { $InstallDir = Join-Path $env:LOCALAPPDATA 'FreebuffFocus' }
+else { $InstallDir = Join-Path $HOME '.freebuff-focus' }
+if ($env:FREEBUFF_FOCUS_HOME) { $InstallDir = $env:FREEBUFF_FOCUS_HOME }
+$BinDir = Join-Path $InstallDir 'bin'
+if ($env:FREEBUFF_FOCUS_BIN_DIR) { $BinDir = $env:FREEBUFF_FOCUS_BIN_DIR }
+$CommandName = 'freebuff-focusmode'
+$InstalledSelf = Join-Path $InstallDir 'freebuff-focus.ps1'
+$AddPath = $false
+$Force = $false
 
 $Command = ''
 $App = ''
@@ -206,6 +220,9 @@ while ($index -lt $Arguments.Count) {
 
   switch ($key) {
     'install' { $Command = 'install' }
+    'setup' { $Command = 'setup' }
+    'update' { $Command = 'update' }
+    'uninstall' { $Command = 'uninstall' }
     'focus' { $Command = 'focus' }
     'unfocus' { $Command = 'unfocus' }
     'status' { $Command = 'status' }
@@ -238,6 +255,8 @@ while ($index -lt $Arguments.Count) {
     'restart' { $Restart = 'always' }
     'norestart' { $Restart = 'never' }
     'nowait' { $Wait = $false }
+    'addpath' { $AddPath = $true }
+    'force' { $Force = $true }
     default {
       # `focus 25m` - the duration is the one positional argument this tool takes,
       # and only focus takes it.
@@ -640,7 +659,7 @@ function Complete-Focus {
   $clock = [DateTimeOffset]::FromUnixTimeSeconds($ends).ToLocalTime().ToString('HH:mm')
   Say ''
   Say "Focus until $clock. Ads come back when you end it:"
-  Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 unfocus'
+  Say "    $(Get-CommandName) unfocus"
   Say 'There is no timer process. A session that runs out leaves the patch where'
   Say 'it is until you run that, which is stated here rather than pretended away.'
 }
@@ -973,12 +992,21 @@ function Show-NextSteps {
   Say '  scan          every anchor this build contains - read-only'
   Say '  revert        restore the pristine backup'
   Say '  doctor        environment report'
+  Say '  update        fetch the newest tool, replace it, then patch again'
+  Say '  uninstall     remove the command; the patch stays'
   Say '  help          every command and option'
   Say ''
-  Say '  Run them as:  powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 <command>'
-  if (-not $HaveLocal) {
-    Say '  No local copy (this run came through irm | iex)? Save one first:'
-    Say "    irm $Origin/downloads/freebuff-focus-desktop.ps1 -OutFile freebuff-focus.ps1"
+  if (Test-Path -LiteralPath (Join-Path $BinDir "$CommandName.cmd") -PathType Leaf) {
+    Say "  Run them as:  $CommandName <command>"
+    if (-not (Test-PathHasBin)) {
+      Say "  ($BinDir is not on PATH in this shell - open a new terminal)"
+    }
+  } else {
+    Say "  Run them as:  $(Get-CommandName) <command>"
+    if (-not $HaveLocal) {
+      Say '  No local copy (this run came through irm | iex)? Install the command once:'
+      Say "    irm $Origin/downloads/freebuff-focus-desktop.ps1 | iex"
+    }
   }
 }
 
@@ -1276,7 +1304,7 @@ function Show-WriteHelp {
 
 function Get-ScanHint {
   Write-Host '  See what this build actually has:'
-  Write-Host '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 scan'
+  Write-Host ('    ' + (Get-CommandName) + ' scan')
   Write-Host "    `$s = irm $Origin/downloads/freebuff-focus-desktop.ps1; & ([scriptblock]::Create(`$s)) scan"
   Write-Host '  Read-only either way. The piped one is for when you ran the one-liner and'
   Write-Host '  have no local copy to point at.'
@@ -1307,6 +1335,9 @@ function Show-Help {
   Say '  scan      show every anchor this build has - changes nothing'
   Say '  revert    restore the pristine backup'
   Say '  doctor    environment report'
+  Say "  setup     install the tool and the $CommandName command (piped runs do this)"
+  Say '  update    fetch the latest tool, replace this copy, then patch again'
+  Say '  uninstall  remove the command and the installed copy; the patch stays'
   Say '  version   print the tool version'
   Say ''
   Say 'options'
@@ -1319,6 +1350,8 @@ function Show-Help {
   Say '  -SessionDir PATH   where a focus session is recorded'
   Say '  -NoWait            verify: report now instead of waiting for the relaunch'
   Say '  -Timeout SECONDS   how long verify waits (default 300)'
+  Say "  -AddPath           setup: append $BinDir to your user PATH"
+  Say '  -Force             update: reinstall even when the version matches'
   Say ''
   Say 'A focus session is a timestamp on disk, not a process. It is 25m, 90m, 2h'
   Say 'or a plain number of minutes, and it does nothing on its own: unfocus'
@@ -1377,10 +1410,10 @@ function Invoke-Status {
     if (Test-AllApplied $result) {
       Say ''
       Say '  Ads are off. Quit Freebuff and reopen it, then check what it loaded:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+      Say "    $(Get-CommandName) verify"
     } else {
       Say ''
-      Say '  Not patched yet. Run: powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 install'
+      Say "  Not patched yet. Run: $(Get-CommandName) install"
     }
     exit 0
   }
@@ -1391,19 +1424,210 @@ function Invoke-Status {
   Say '  changed the file. Nothing was written.'
   Say ''
   Say '  See what this build actually has:'
-  Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 scan'
+  Say "    $(Get-CommandName) scan"
   Say ''
   $backup = Join-Path $BackupDir "orchestrator.js.$appVersion.orig"
   if (Test-Path -LiteralPath $backup -PathType Leaf) {
     Say '  A pristine backup exists. Restore it, then install again:'
-    Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 revert'
+    Say "    $(Get-CommandName) revert"
   } else {
     Say '  If you patched this by hand before, restore the original file first.'
   }
   exit 1
 }
 
+# --------------------------------------------------------------- the command
+
+function Get-LocalScriptVersion {
+  param([string] $Path)
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+  $line = Select-String -LiteralPath $Path -Pattern '^\$Version = ' -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $line -or $line.Line -notmatch "'(.*)'") { return '' }
+  return $Matches[1]
+}
+
+function Get-RemoteScript {
+  param([string] $Destination)
+  $uri = "$Origin/downloads/freebuff-focus-desktop.ps1"
+  if ($uri -match '^file://') {
+    # A file:// origin is how the tests run update without the network.
+    $local = ([uri]$uri).LocalPath
+    if (-not (Test-Path -LiteralPath $local -PathType Leaf)) { Die "cannot reach $Origin - nothing was changed" }
+    Copy-Item -LiteralPath $local -Destination $Destination -Force
+    return
+  }
+  try {
+    Invoke-WebRequest -Uri $uri -OutFile $Destination -UseBasicParsing -ErrorAction Stop
+  } catch {
+    Die "cannot reach $Origin - nothing was changed"
+  }
+}
+
+# How a hint names this tool: the installed command when it exists, the local
+# file otherwise. Someone who ran the one-liner should be told to use what it
+# created, not a .ps1 path that was never written.
+function Get-CommandName {
+  if (Test-Path -LiteralPath (Join-Path $BinDir "$CommandName.cmd") -PathType Leaf) { return $CommandName }
+  return 'powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1'
+}
+
+function Test-PathHasBin {
+  $sep = [System.IO.Path]::PathSeparator
+  foreach ($entry in ("$env:Path" -split [regex]::Escape($sep))) {
+    if ($entry.TrimEnd('\', '/') -eq $BinDir.TrimEnd('\', '/')) { return $true }
+  }
+  return $false
+}
+
+function Add-BinToPath {
+  try {
+    $current = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (-not $current) { $current = '' }
+    if (($current -split ';') -contains $BinDir) { return $true }
+    $next = if ($current) { "$BinDir;$current" } else { $BinDir }
+    [Environment]::SetEnvironmentVariable('Path', $next, 'User')
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+# Install the tool and the command that runs it. The first `irm | iex` does this,
+# so the reader gets `freebuff-focusmode status` instead of a file they have to
+# name and a folder they have to remember.
+# True when the first version is strictly newer than the second. Used to refuse
+# a downgrade: the site is the authority on what is current, but it must never
+# hand back something older than what is already on disk and call it an update.
+function Test-VersionNewer {
+  param([string] $Candidate, [string] $Reference)
+  try {
+    return ([version]$Candidate) -gt ([version]$Reference)
+  } catch {
+    return $false
+  }
+}
+
+function Show-Setup {
+  New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+  New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+
+  $tmp = "$InstalledSelf.tmp"
+  if ($HaveLocal -and $PSCommandPath) {
+    # Exactly the code that is running: a local copy needs no second download.
+    Copy-Item -LiteralPath $PSCommandPath -Destination $tmp -Force
+  } else {
+    Get-RemoteScript $tmp
+    $got = Get-LocalScriptVersion $tmp
+    if (-not $got) {
+      Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+      Die 'the download does not look like this tool - nothing was installed'
+    }
+    if ($got -ne $Version) {
+      # A copy older than the code that is running is a stale site, not an
+      # update: installing it would hand back a tool missing this very command.
+      if (Test-VersionNewer $Version $got) {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        Die "the site is serving $got while this run is $Version - nothing was installed. Try the one-liner again in a minute."
+      }
+      Warn "downloaded $got while running $Version - installing $got"
+    }
+  }
+
+  Move-Item -LiteralPath $tmp -Destination $InstalledSelf -Force
+
+  $shim = Join-Path $BinDir "$CommandName.cmd"
+  $body = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$InstalledSelf`" %*`r`n"
+  try { [System.IO.File]::WriteAllText($shim, $body) } catch { Die "cannot write $shim" }
+
+  Ok "installed $InstalledSelf"
+  Ok "command   $shim"
+
+  if (Test-PathHasBin) {
+    Say "  $BinDir is already on PATH"
+  } elseif ($AddPath) {
+    if (Add-BinToPath) {
+      Say "  path      added $BinDir to your user PATH"
+      Say "  Open a new terminal, then run:  $CommandName status"
+    } else {
+      Warn "could not update PATH - add $BinDir yourself"
+    }
+  } else {
+    Say ''
+    Say "  $BinDir is not on PATH yet. Add it for good, as the current user:"
+    Say "    [Environment]::SetEnvironmentVariable('Path', `"$BinDir;`$env:Path`", 'User')"
+    Say '  or rerun setup with -AddPath and this is done for you.'
+  }
+}
+
+function Invoke-Update {
+  if (-not (Test-Path -LiteralPath $InstalledSelf -PathType Leaf)) {
+    Die "no installed copy yet - run the one-liner from $Origin"
+  }
+
+  Say 'Freebuff Focus - update'
+  $old = Get-LocalScriptVersion $InstalledSelf
+  $oldText = if ($old) { $old } else { 'unknown' }
+  Say "  installed  $oldText"
+
+  $tmp = "$InstalledSelf.new"
+  Get-RemoteScript $tmp
+  $new = Get-LocalScriptVersion $tmp
+  if (-not $new) {
+    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    Die 'the download does not look like this tool - kept the installed copy'
+  }
+  Say "  available  $new"
+
+  if ($new -eq $old -and -not $Force) {
+    Remove-Item -LiteralPath $tmp -Force
+    Ok 'already up to date'
+    exit 0
+  }
+
+  if (-not $Force -and (Test-VersionNewer $old $new)) {
+    Remove-Item -LiteralPath $tmp -Force
+    Die "the site is serving $new, which is older than the installed $old - nothing was changed"
+  }
+
+  Copy-Item -LiteralPath $InstalledSelf -Destination "$InstalledSelf.prev" -Force -ErrorAction SilentlyContinue
+  Move-Item -LiteralPath $tmp -Destination $InstalledSelf -Force
+  Ok "updated    $oldText -> $new"
+  Say "  previous   $InstalledSelf.prev"
+  Say ''
+
+  Invoke-Install
+  exit 0
+}
+
+function Invoke-Uninstall {
+  $shim = Join-Path $BinDir "$CommandName.cmd"
+  $removed = $false
+  if (Test-Path -LiteralPath $shim -PathType Leaf) {
+    Remove-Item -LiteralPath $shim -Force
+    Ok "removed $shim"
+    $removed = $true
+  }
+  if (Test-Path -LiteralPath $InstalledSelf -PathType Leaf) {
+    Remove-Item -LiteralPath $InstalledSelf -Force
+    Remove-Item -LiteralPath "$InstalledSelf.prev" -Force -ErrorAction SilentlyContinue
+    Ok "removed $InstalledSelf"
+    $removed = $true
+  }
+
+  if (-not $removed) {
+    Say '  Nothing was installed here.'
+    exit 0
+  }
+  Say ''
+  Say '  The patch is still applied. Restore the ads first next time, with a fresh copy.'
+  exit 0
+}
+
 function Invoke-Install {
+  # The one-liner is the install path: a piped run with no file behind it puts the
+  # command on the machine first, then patches. A local copy just patches.
+  if (-not $HaveLocal) { Show-Setup }
+
   $appDir = Get-RequiredApp
   $target = Get-RequiredTarget $appDir
   $appVersion = Get-AppVersion $appDir
@@ -1427,7 +1651,7 @@ function Invoke-Install {
     $backup = Join-Path $BackupDir "orchestrator.js.$appVersion.orig"
     if (Test-Path -LiteralPath $backup -PathType Leaf) {
       Say '  A pristine backup is on disk:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 revert'
+      Say "    $(Get-CommandName) revert"
     }
     exit 1
   }
@@ -1453,14 +1677,14 @@ function Invoke-Install {
       Say ' The orchestrator is read once at launch, so the patch takes effect'
       Say '  on the next start.'
       Say '  Then check what it loaded:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+      Say "    $(Get-CommandName) verify"
     } elseif (Test-StalePatch -AppDir $appDir -Target $target) {
       if ($Restart -eq 'never') {
         Write-Piece '  Freebuff is running the bytes from before the patch.' 'White'
         Say ''
         Say '  Quit it completely and reopen it - focusing the window is not enough.'
         Say '  Then check what it loaded:'
-        Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+        Say "    $(Get-CommandName) verify"
       } else {
         Say '  A process that started before the patch is still running it.'
         if (Restart-App -AppDir $appDir -Target $target) {
@@ -1569,13 +1793,13 @@ function Invoke-Install {
       Say 'The orchestrator is read once at launch, so the patch only takes effect on'
       Say 'the next start - focusing the window is not enough.'
       Say '  Then check what it loaded:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+      Say "    $(Get-CommandName) verify"
     } else {
       Write-Piece 'Open Freebuff.' 'White'
       Write-Host ''
       Say 'The patch takes effect on the next launch.'
       Say '  Then check what it loaded:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+      Say "    $(Get-CommandName) verify"
     }
   } elseif ($running -or $Restart -eq 'always') {
     Write-Piece 'Restarting Freebuff so the patch takes effect.' 'White'
@@ -1591,23 +1815,24 @@ function Invoke-Install {
         Wait-ForRelaunch -AppDir $appDir -Target $target | Out-Null
       } else {
         Say '  Then check what it loaded:'
-        Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+        Say "    $(Get-CommandName) verify"
       }
     } else {
       Warn 'could not restart Freebuff - quit it completely, reopen it, then:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+      Say "    $(Get-CommandName) verify"
     }
   } else {
     Write-Piece 'Open Freebuff.' 'White'
     Write-Host ''
     Say 'The patch takes effect on the next launch.'
     Say '  Then check what it loaded:'
-    Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+    Say "    $(Get-CommandName) verify"
   }
   Say ''
   Say 'Undo any time: unfocus ends a session.'
-  Say 'Back to ads only: powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 revert'
+  Say "Back to ads only: $(Get-CommandName) revert"
   Say 'After a Freebuff update, run install again.'
+  Say "For a newer version of this tool itself: $(Get-CommandName) update"
   Say ''
   Show-NextSteps
   Complete-Focus
@@ -1788,7 +2013,7 @@ function Invoke-Verify {
     Say "  There is nothing of this tool's to verify, and nothing was written."
     Say ''
     Say '  See what this build actually has:'
-    Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 scan'
+    Say "    $(Get-CommandName) scan"
     exit 1
   }
 
@@ -1796,7 +2021,7 @@ function Invoke-Verify {
     Show-Report $result
     Say ''
     Say '  Not patched yet. Run:'
-    Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 install'
+    Say "    $(Get-CommandName) install"
     exit 1
   }
 
@@ -1893,7 +2118,7 @@ function Wait-ForRelaunch {
       Say ''
       Say '  Not verified. This check needs Freebuff running the patched file.'
       Say '  Quit it completely, reopen it, then run it again:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+      Say "    $(Get-CommandName) verify"
       return 1
     }
 
@@ -1909,7 +2134,7 @@ function Wait-ForRelaunch {
       Say ''
       Say '  Stopped waiting. The patch itself is fine - this check only needs the'
       Say '  relaunch. Run it again once Freebuff is open:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+      Say "    $(Get-CommandName) verify"
       return 1
     }
 
@@ -1934,6 +2159,9 @@ function Invoke-Unfocus {
 
 switch ($Command) {
   'install' { Invoke-Install }
+  'setup' { Show-Setup; exit 0 }
+  'update' { Invoke-Update }
+  'uninstall' { Invoke-Uninstall }
   'focus' { Invoke-Focus }
   'unfocus' { Invoke-Unfocus }
   'status' { Invoke-Status }

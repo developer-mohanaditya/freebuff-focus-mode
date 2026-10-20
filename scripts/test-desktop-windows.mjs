@@ -35,6 +35,19 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOOL = path.join(ROOT, 'desktop', 'freebuff-focus.ps1');
 const TOOL_SOURCE = fs.readFileSync(TOOL, 'utf8');
 
+/**
+ * The tool as it is served: stamped. A piped install now puts the command on the
+ * machine first and installs the copy it downloads, so the piped runs need a
+ * version that compares as a real one.
+ */
+const FIXTURE_VERSION = '1.8.0';
+const STAMPED_SOURCE = TOOL_SOURCE.replaceAll('__FBD_VERSION__', FIXTURE_VERSION).replaceAll(
+  '__FBD_ORIGIN__',
+  'https://focus.test'
+);
+const STAMPED_PS1 = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fbd-win-stamped-')), 'freebuff-focus.ps1');
+fs.writeFileSync(STAMPED_PS1, STAMPED_SOURCE);
+
 /* ---------------------------------------------------------------------- pwsh */
 
 /**
@@ -101,6 +114,17 @@ const check = (name, actual, expected = true) => {
  * `resources\orchestrator\orchestrator.js` inside it. No `.app`, no Info.plist -
  * that is the whole difference from the macOS fixture.
  */
+/** A served copy beside the install, so setup and update never need the network. */
+function makeOrigin(root, version = FIXTURE_VERSION) {
+  const dir = path.join(root, 'origin');
+  fs.mkdirSync(path.join(dir, 'downloads'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'downloads', 'freebuff-focus-desktop.ps1'), served(version));
+  return `file://${dir}`;
+}
+
+const served = (version) =>
+  TOOL_SOURCE.replaceAll('__FBD_VERSION__', version).replaceAll('__FBD_ORIGIN__', 'https://focus.test');
+
 function makeInstall(body = CURRENT, name = 'Freebuff') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fbd-win-'));
   const app = path.join(root, name);
@@ -108,15 +132,47 @@ function makeInstall(body = CURRENT, name = 'Freebuff') {
   fs.mkdirSync(orch, { recursive: true });
   const target = path.join(orch, 'orchestrator.js');
   fs.writeFileSync(target, body);
-  return { root, app, target, backups: path.join(root, 'backups') };
+  return {
+    root,
+    app,
+    target,
+    backups: path.join(root, 'backups'),
+    origin: makeOrigin(root),
+    home: path.join(root, 'focus-home'),
+    bin: path.join(root, 'focus-bin'),
+  };
+}
+
+/**
+ * Where an install would land, per fixture. Without these, `setup` would put a
+ * command in the real per-user app data of whatever machine runs this suite.
+ */
+function toolEnv(install, extra = {}) {
+  return {
+    ...powershellEnv(),
+    FREEBUFF_FOCUS_HOME: install.home,
+    FREEBUFF_FOCUS_BIN_DIR: install.bin,
+    FREEBUFF_FOCUS_ORIGIN: install.origin,
+    ...extra,
+  };
 }
 
 const psArgs = (args) => ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', TOOL, ...args];
 
+/** The three paths a fixture's install would use, from the app's location. */
+const installPaths = (app) => {
+  const root = path.dirname(app);
+  return {
+    home: path.join(root, 'focus-home'),
+    bin: path.join(root, 'focus-bin'),
+    origin: `file://${path.join(root, 'origin')}`,
+  };
+};
+
 function run(app, backups, ...args) {
   return spawnSync(POWERSHELL, psArgs([...args, '-App', app, '-BackupDir', backups]), {
     encoding: 'utf8',
-    env: powershellEnv(),
+    env: toolEnv(installPaths(app)),
   });
 }
 
@@ -132,9 +188,24 @@ function runPiped(app, backups, ...args) {
   const command = `$s = [Console]::In.ReadToEnd(); & ([scriptblock]::Create($s)) ${quoted.join(' ')}`;
   return spawnSync(POWERSHELL, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], {
     encoding: 'utf8',
-    env: powershellEnv(),
-    input: TOOL_SOURCE,
+    env: toolEnv(installPaths(app)),
+    input: STAMPED_SOURCE,
   });
+}
+
+const runStamped = (app, backups, ...args) =>
+  spawnSync(POWERSHELL, ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', STAMPED_PS1, ...args, '-App', app, '-BackupDir', backups], {
+    encoding: 'utf8',
+    env: toolEnv(installPaths(app)),
+  });
+
+/** The installed copy, run the way the .cmd launcher runs it: as a file. */
+function runInstalled(install, ...args) {
+  return spawnSync(
+    POWERSHELL,
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', path.join(install.home, 'freebuff-focus.ps1'), ...args],
+    { encoding: 'utf8', env: toolEnv(install) }
+  );
 }
 
 const count = (text, needle) => text.split(needle).length - 1;
@@ -638,6 +709,68 @@ check('with the render anchor applied once', count(read(big.target), '/*FBD-ADS-
 check('and the request anchor applied once', count(read(big.target), '/*FBD-ADS-OFF:request*/'), 1);
 check('and the backup is the whole original', read(path.join(big.backups, 'orchestrator.js.unknown.orig')).length === bigBody.length);
 check(`the install finishes in reasonable time (${bigElapsed} ms)`, bigElapsed < 60000);
+
+/* ------------------------------------------------------- the installed command */
+
+/**
+ * What `irm | iex` leaves behind: a `freebuff-focusmode.cmd` launcher, the tool
+ * beside it, and a way to replace or remove both. The launcher itself is a batch
+ * file, so this host runs the installed .ps1 the way that batch file runs it and
+ * reads the batch file to check it points at the right copy with `%*` after it.
+ */
+console.log('\nthe freebuff-focusmode command');
+
+const cmdInstall = makeInstall();
+const setup = runStamped(cmdInstall.app, cmdInstall.backups, 'setup');
+const launcher = path.join(cmdInstall.bin, 'freebuff-focusmode.cmd');
+check('setup exits 0', setup.status, 0);
+check('it writes the launcher', fs.existsSync(launcher));
+check('the launcher runs the installed copy', fs.existsSync(path.join(cmdInstall.home, 'freebuff-focus.ps1')));
+check('and passes its arguments through', read(launcher).includes('%*'));
+check('and says where both went', setup.stdout.includes(cmdInstall.home) && setup.stdout.includes(launcher));
+check('and does not patch anything yet', read(cmdInstall.target) === CURRENT);
+check('setup again is not an error', runStamped(cmdInstall.app, cmdInstall.backups, 'setup').status, 0);
+
+const viaCommand = runInstalled(cmdInstall, 'version');
+check('the installed copy runs', viaCommand.status, 0);
+check('and reports the tool version', /freebuff-focus-desktop 1\.8\.0/.test(viaCommand.stdout));
+// -AddPath edits the user PATH, which is a Windows-only operation; on another
+// host the tool has to admit it could not and leave the rest usable.
+const added = runStamped(cmdInstall.app, cmdInstall.backups, 'setup', '-AddPath');
+check('-AddPath exits 0 either way', added.status, 0);
+check(
+  'and either adds the folder or says it could not',
+  /added .* to your user PATH/.test(added.stdout) || /could not update PATH/.test(added.stdout)
+);
+
+const freshInstall = makeInstall();
+runStamped(freshInstall.app, freshInstall.backups, 'setup');
+makeOrigin(freshInstall.root, '1.8.1');
+const updated = runInstalled(freshInstall, 'update', '-App', freshInstall.app, '-BackupDir', freshInstall.backups);
+check('update exits 0', updated.status, 0);
+check('it names both versions', /1\.8\.0 -> 1\.8\.1/.test(updated.stdout));
+check('the installed copy is the new one', /\$Version = '1\.8\.1'/.test(read(path.join(freshInstall.home, 'freebuff-focus.ps1'))));
+check('the copy it replaced is kept', fs.existsSync(path.join(freshInstall.home, 'freebuff-focus.ps1.prev')));
+// The patch step is the new copy's, with the paths this run was given.
+check('and it patches with the new copy', count(read(freshInstall.target), '/*FBD-ADS-OFF:render*/'), 1);
+check('and names the command once more at the end', /Run them as:\s+freebuff-focusmode/.test(updated.stdout));
+
+const current = runInstalled(freshInstall, 'update');
+check('a second update says it is already current', /already up to date/.test(current.stdout));
+check('and exits 0', current.status, 0);
+
+makeOrigin(freshInstall.root, '1.7.9');
+const older = runInstalled(freshInstall, 'update');
+check('an older served copy is refused', older.status !== 0);
+check('and it says which way round they are', /older than the installed/.test(both(older)));
+check('and the installed copy is untouched', /\$Version = '1\.8\.1'/.test(read(path.join(freshInstall.home, 'freebuff-focus.ps1'))));
+
+const removed = runInstalled(freshInstall, 'uninstall');
+check('uninstall exits 0', removed.status, 0);
+check('it removes the launcher', fs.existsSync(path.join(freshInstall.bin, 'freebuff-focusmode.cmd')), false);
+check('and the installed copy', fs.existsSync(path.join(freshInstall.home, 'freebuff-focus.ps1')), false);
+check('and says the patch is still applied', /patch is still applied/.test(removed.stdout));
+check('and the patch really is still applied', count(read(freshInstall.target), '/*FBD-ADS-OFF:render*/'), 1);
 
 /* ---------------------------------------------------- the shipped artifact */
 

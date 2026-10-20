@@ -89,7 +89,29 @@ AFTER YOU RUN IT
    Ctrl-C stops the wait at any time, and an interrupted wait prints no verdict.
 
 3. After a Freebuff update, run `install` again. An update is a new AppImage, and
-   the patched copy is left behind by it.
+   the patched copy is left behind by it. For a newer version of this tool itself,
+   run `freebuff-focusmode update` once it is installed.
+
+
+INSTALL IT AS A COMMAND
+-----------------------
+
+Run this once and you stop naming a file:
+
+  sh freebuff-focus-linux.sh setup
+
+It copies the tool to ~/.local/share/freebuff-focus, writes
+`freebuff-focusmode` into ~/.local/bin, and prints the one line to add that
+folder to your PATH if it is not there already. `setup --add-path` edits your
+shell rc instead of telling you to. After that:
+
+  freebuff-focusmode status     report what is applied - changes nothing
+  freebuff-focusmode focus 25m  start a session
+  freebuff-focusmode unfocus    end it, and bring the ads back
+  freebuff-focusmode update     fetch a newer tool, replace this copy, patch again
+  freebuff-focusmode uninstall  remove the command; the patch stays
+
+The one-liner on the install page does this for you.
 
 
 OTHER COMMANDS

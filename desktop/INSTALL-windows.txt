@@ -60,6 +60,27 @@ install under C:\Program Files, open PowerShell with "Run as administrator" and
 run the same command - a per-user install never needs that. The tool never asks
 for a password and never elevates by itself.
 
+INSTALL IT AS A COMMAND
+-----------------------
+
+Run this once and you stop naming a file:
+
+  powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 setup
+
+It copies the tool to %LOCALAPPDATA%\FreebuffFocus, writes
+`freebuff-focusmode.cmd` into its bin folder, and prints the exact command that
+adds that folder to your user PATH - `setup -AddPath` runs it for you. After
+that:
+
+  freebuff-focusmode status     report what is applied - changes nothing
+  freebuff-focusmode focus 25m  start a session
+  freebuff-focusmode unfocus    end it, and bring the ads back
+  freebuff-focusmode update     fetch a newer tool, replace this copy, patch again
+  freebuff-focusmode uninstall  remove the command; the patch stays
+
+The one-liner on the install page does this for you.
+
+
 OTHER COMMANDS
 --------------
 
@@ -86,7 +107,8 @@ AFTER A FREEBUFF UPDATE
 -----------------------
 
 Every update replaces the app's resources folder, so the patch goes away. Run
-install again after an update.
+install again after an update. For a newer version of this tool itself, run
+`freebuff-focusmode update` once it is installed.
 
 An update can also change the code the tool looks for. Each anchor has a literal
 form and a relaxed one; the relaxed form is only used when it appears the expected

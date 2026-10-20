@@ -41,6 +41,18 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOOL = path.join(ROOT, 'desktop', 'freebuff-focus.sh');
 const TOOL_SOURCE = fs.readFileSync(TOOL, 'utf8');
 
+/**
+ * The tool as it is served: stamped. The piped runs below get this rather than
+ * the source, because a piped `install` now downloads the tool it installs and
+ * refuses a copy older than the code that is running - and the source's
+ * placeholder version compares as older than any real one.
+ */
+const FIXTURE_VERSION = '1.8.0';
+const STAMPED_SOURCE = TOOL_SOURCE.replaceAll('__FBD_VERSION__', FIXTURE_VERSION).replaceAll(
+  '__FBD_ORIGIN__',
+  'https://focus.test'
+);
+
 /* -------------------------------------------------------------------- harness */
 
 const results = [];
@@ -50,6 +62,22 @@ const check = (name, actual, expected = true) => {
   console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${name}${ok ? '' : ` -> ${JSON.stringify(actual)} (want ${JSON.stringify(expected)})`}`);
 };
 
+/**
+ * A served copy of the tool beside the bundle, so `setup` and `update` have an
+ * origin to fetch from without touching the network. Every run below points
+ * FREEBUFF_FOCUS_ORIGIN at it, which is also what keeps the real
+ * ~/.local/share and ~/.local/bin out of these tests.
+ */
+function makeOrigin(root, version = FIXTURE_VERSION) {
+  const dir = path.join(root, 'origin');
+  fs.mkdirSync(path.join(dir, 'downloads'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'downloads', 'freebuff-focus-desktop.sh'), served(version));
+  return `file://${dir}`;
+}
+
+const served = (version) =>
+  TOOL_SOURCE.replaceAll('__FBD_VERSION__', version).replaceAll('__FBD_ORIGIN__', 'https://focus.test');
+
 function makeBundle(body = CURRENT) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fbd-test-'));
   const app = path.join(root, 'Freebuff.app');
@@ -57,12 +85,46 @@ function makeBundle(body = CURRENT) {
   fs.mkdirSync(orch, { recursive: true });
   const target = path.join(orch, 'orchestrator.js');
   fs.writeFileSync(target, body);
-  return { root, app, target, backups: path.join(root, 'backups') };
+  return {
+    root,
+    app,
+    target,
+    backups: path.join(root, 'backups'),
+    origin: makeOrigin(root),
+    home: path.join(root, 'focus-home'),
+    bin: path.join(root, 'focus-bin'),
+  };
 }
+
+/**
+ * Where an install would land, per fixture. A test that let `setup` write to the
+ * real ~/.local/bin would be installing a command on the machine that runs the
+ * suite.
+ */
+function toolEnv(bundle, extra = {}) {
+  return {
+    ...process.env,
+    FREEBUFF_FOCUS_HOME: bundle.home,
+    FREEBUFF_FOCUS_BIN_DIR: bundle.bin,
+    FREEBUFF_FOCUS_ORIGIN: bundle.origin,
+    ...extra,
+  };
+}
+
+/** The three paths a fixture's install would use, from the bundle's location. */
+const bundlePaths = (app) => {
+  const root = path.dirname(app);
+  return {
+    home: path.join(root, 'focus-home'),
+    bin: path.join(root, 'focus-bin'),
+    origin: `file://${path.join(root, 'origin')}`,
+  };
+};
 
 function run(app, backups, ...args) {
   return spawnSync('sh', [TOOL, ...args, '--app', app, '--backup-dir', backups], {
     encoding: 'utf8',
+    env: toolEnv(bundlePaths(app)),
   });
 }
 
@@ -73,7 +135,31 @@ function run(app, backups, ...args) {
 function runPiped(app, backups, ...args) {
   return spawnSync('sh', ['-s', ...args, '--app', app, '--backup-dir', backups], {
     encoding: 'utf8',
-    input: TOOL_SOURCE,
+    input: STAMPED_SOURCE,
+    env: toolEnv(bundlePaths(app)),
+  });
+}
+
+/**
+ * The same stamped copy, on disk: a local install hands over exactly the code it
+ * is running, so a stamped one is what gives the installed copy a real version to
+ * compare in `update`.
+ */
+const STAMPED_TOOL = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fbd-stamped-')), 'freebuff-focus.sh');
+fs.writeFileSync(STAMPED_TOOL, STAMPED_SOURCE);
+
+const runStamped = (app, backups, ...args) =>
+  spawnSync('sh', [STAMPED_TOOL, ...args, '--app', app, '--backup-dir', backups], {
+    encoding: 'utf8',
+    env: toolEnv(bundlePaths(app)),
+  });
+
+/** The command itself, the way the shell would run it: by name. */
+function runCommand(bundle, ...args) {
+  const shim = path.join(bundle.bin, 'freebuff-focusmode');
+  return spawnSync(shim, args, {
+    encoding: 'utf8',
+    env: toolEnv(bundle, { PATH: `${bundle.bin}:${process.env.PATH}` }),
   });
 }
 
@@ -274,15 +360,16 @@ check('`sh -s scan` exits 0', pipedScan.status, 0);
 check('and prints the scan report', /== render ==/.test(pipedScan.stdout));
 check('and names the tool version it is running', /anchor scan \(tool \S+\)/.test(pipedScan.stdout));
 
-// The piped run has no script on disk, so "sh freebuff-focus.sh verify" would be
-// a command they cannot run. It has to say what to save first. A fresh bundle,
-// because `a` has been reverted by the time this runs.
+// A piped run has no script on disk, so it installs the command first and then
+// names that command in its hints. A fresh bundle, because `a` has been reverted
+// by the time this runs.
 const k = makeBundle();
 run(k.app, k.backups, 'install');
 const pipedAgain = runPiped(k.app, k.backups, 'install');
+check('a piped install puts the command on the machine', fs.existsSync(path.join(k.bin, 'freebuff-focusmode')));
 check('a piped second install still reports already patched', /Already patched/.test(pipedAgain.stdout));
-check('and, with no file on disk, says how to save one', /No local copy/.test(pipedAgain.stdout));
-check('naming the real download it came from', /downloads\/freebuff-focus-desktop\.sh/.test(pipedAgain.stdout));
+check('and names the command rather than a file to save', /Run them as:\s+freebuff-focusmode/.test(pipedAgain.stdout));
+check('and no longer tells them to save a copy first', /No local copy/.test(pipedAgain.stdout), false);
 
 /* ------------------------------------------------------------------ verify */
 
@@ -481,6 +568,78 @@ const badDuration = run(s.app, s.backups, 'focus', 'soon', '--session-dir', sess
 check('a duration that is not a duration is refused', badDuration.status !== 0);
 check('and it says what one looks like', /duration like 25m/.test(`${badDuration.stdout}${badDuration.stderr}`));
 check('and nothing is patched', read(s.target) === CURRENT);
+
+/* ------------------------------------------------------- the installed command */
+
+/**
+ * The one-liner is the install path, so what it creates is the product: a
+ * `freebuff-focusmode` command that keeps working after the curl is forgotten,
+ * a way to replace it with a newer copy, and a way to take it away again without
+ * taking the patch with it.
+ */
+console.log('\nthe freebuff-focusmode command');
+
+const inst = makeBundle();
+const setup = runStamped(inst.app, inst.backups, 'setup');
+const shim = path.join(inst.bin, 'freebuff-focusmode');
+check('setup exits 0', setup.status, 0);
+check('it writes the command', fs.existsSync(shim));
+check('the command is executable', (fs.statSync(shim).mode & 0o111) !== 0);
+check('it installs the tool itself', fs.existsSync(path.join(inst.home, 'freebuff-focus.sh')));
+check('and says where both went', setup.stdout.includes(inst.home) && setup.stdout.includes(shim));
+check('and does not patch anything yet', read(inst.target) === CURRENT);
+check('setup again is not an error', runStamped(inst.app, inst.backups, 'setup').status, 0);
+
+const viaCommand = runCommand(inst, 'version');
+check('the command runs the tool', viaCommand.status, 0);
+check('and reports the tool version', /freebuff-focus-desktop 1\.8\.0/.test(viaCommand.stdout));
+const commandStatus = runCommand(inst, 'status', '--app', inst.app, '--backup-dir', inst.backups);
+check('arguments reach the tool through the command', /Not patched yet/.test(commandStatus.stdout));
+
+// --add-path edits a dotfile, so it is opt-in and it has to be idempotent: the
+// marker is what stops a second run from appending the same line twice.
+const p1 = spawnSync('sh', [STAMPED_TOOL, 'setup', '--add-path'], {
+  encoding: 'utf8',
+  env: toolEnv(inst, { HOME: inst.root, SHELL: '/bin/bash' }),
+});
+spawnSync('sh', [STAMPED_TOOL, 'setup', '--add-path'], {
+  encoding: 'utf8',
+  env: toolEnv(inst, { HOME: inst.root, SHELL: '/bin/bash' }),
+});
+const rc = path.join(inst.root, '.bashrc');
+check('--add-path exits 0', p1.status, 0);
+check('it adds the folder to the shell rc', fs.existsSync(rc) && read(rc).includes(inst.bin));
+check('and only once, however often setup runs', count(read(rc), '# freebuff-focus PATH'), 1);
+
+const fresh = makeBundle();
+runStamped(fresh.app, fresh.backups, 'setup');
+makeOrigin(fresh.root, '1.8.1');
+const updated = runCommand(fresh, 'update', '--app', fresh.app, '--backup-dir', fresh.backups);
+check('update exits 0', updated.status, 0);
+check('it names both versions', /1\.8\.0 -> 1\.8\.1/.test(updated.stdout));
+check('the installed copy is the new one', /VERSION="1\.8\.1"/.test(read(path.join(fresh.home, 'freebuff-focus.sh'))));
+check('the copy it replaced is kept', fs.existsSync(path.join(fresh.home, 'freebuff-focus.sh.prev')));
+// The patch step is the new copy's, with the paths this run was given: the
+// handover must not fall back to guessing where Freebuff is.
+check('and it patches with the new copy', count(read(fresh.target), '/*FBD-ADS-OFF:render*/'), 1);
+check('and names the command once more at the end', /Run them as:\s+freebuff-focusmode/.test(updated.stdout));
+
+const current = runCommand(fresh, 'update');
+check('a second update says it is already current', /already up to date/.test(current.stdout));
+check('and exits 0', current.status, 0);
+
+makeOrigin(fresh.root, '1.7.9');
+const older = runCommand(fresh, 'update');
+check('an older served copy is refused', older.status !== 0);
+check('and it says which way round they are', /older than the installed/.test(older.stderr));
+check('and the installed copy is untouched', /VERSION="1\.8\.1"/.test(read(path.join(fresh.home, 'freebuff-focus.sh'))));
+
+const removed = runCommand(fresh, 'uninstall');
+check('uninstall exits 0', removed.status, 0);
+check('it removes the command', fs.existsSync(path.join(fresh.bin, 'freebuff-focusmode')), false);
+check('and the installed copy', fs.existsSync(path.join(fresh.home, 'freebuff-focus.sh')), false);
+check('and says the patch is still applied', /patch is still applied/.test(removed.stdout));
+check('and the patch really is still applied', count(read(fresh.target), '/*FBD-ADS-OFF:render*/'), 1);
 
 /* ---------------------------------------------------- the shipped artifact */
 

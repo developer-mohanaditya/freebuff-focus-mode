@@ -58,12 +58,22 @@ set -u
 
 # Stamped at build time (scripts/build-desktop.mjs).
 VERSION="__FBD_VERSION__"
-ORIGIN="__FBD_ORIGIN__"
+# The test suite points this at a file:// copy so update can be exercised without
+# the network. Nothing else sets it.
+ORIGIN="${FREEBUFF_FOCUS_ORIGIN:-__FBD_ORIGIN__}"
 
 # Whether this run has the script on disk. `curl | sh` does not, so a hint that
 # says "sh freebuff-focus.sh status" would point at a file that is not there.
 HAVE_LOCAL=0
 [ -f "${0:-}" ] && HAVE_LOCAL=1
+
+# Where the tool lives once it installs itself, and the command that finds it.
+# The install folder doubles as the session folder - one small directory, two
+# files, nothing to clean up twice.
+INSTALL_DIR="${FREEBUFF_FOCUS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/freebuff-focus}"
+BIN_DIR="${FREEBUFF_FOCUS_BIN_DIR:-$HOME/.local/bin}"
+COMMAND_NAME="freebuff-focusmode"
+INSTALLED_SELF="$INSTALL_DIR/freebuff-focus.sh"
 
 # The backup folder keeps its 1.6 name on purpose: renaming it would orphan every
 # pristine copy an existing install already wrote, and those are exactly what
@@ -87,6 +97,11 @@ FOCUS_ARG=""
 WAIT=1
 WAIT_SECS=300
 COMMAND=""
+# setup --add-path: append the bin folder to the shell rc instead of printing the
+# line for the reader to paste. Opt-in, because it edits a dotfile.
+ADD_PATH=0
+# update --force: reinstall even when the version already matches.
+FORCE=0
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   B="$(printf '\033[1m')"; DIM="$(printf '\033[2m')"; GREEN="$(printf '\033[32m')"
@@ -102,11 +117,20 @@ bad() { printf '  %s%s%s %s\n' "$RED" "x" "$OFF" "$*"; }
 die() { printf '%s%serror:%s %s\n' "$B" "$RED" "$OFF" "$*" >&2; exit 1; }
 hr() { printf '%s\n' "${DIM}--------------------------------------------${OFF}"; }
 
+# How a hint names this tool: the installed command when it exists, the local file
+# otherwise. Someone who ran the one-liner should be told to use what it created.
+cmdname() {
+  if [ -x "$BIN_DIR/$COMMAND_NAME" ]; then printf '%s' "$COMMAND_NAME"
+  else printf '%s' "sh freebuff-focus.sh"
+  fi
+}
+
 # ------------------------------------------------------------------- arg parse
 
 while [ $# -gt 0 ]; do
   case "$1" in
     install|status|verify|revert|doctor|scan|focus|unfocus|help|version) COMMAND="$1"; shift ;;
+    setup|update|uninstall) COMMAND="$1"; shift ;;
     --app=*) APP="${1#--app=}"; shift ;;
     --backup-dir=*) BACKUP_DIR="${1#--backup-dir=}"; shift ;;
     --session-dir=*) SESSION_DIR="${1#--session-dir=}"; shift ;;
@@ -120,6 +144,8 @@ while [ $# -gt 0 ]; do
     --restart) RESTART=always; shift ;;
     --no-restart) RESTART=never; shift ;;
     --no-wait) WAIT=0; shift ;;
+    --add-path) ADD_PATH=1; shift ;;
+    --force) FORCE=1; shift ;;
     --timeout) shift; [ $# -gt 0 ] || die "--timeout needs a number of seconds"; WAIT_SECS="$1"; shift ;;
     --timeout=*) WAIT_SECS="${1#--timeout=}"; shift ;;
     -h|--help) COMMAND=help; shift ;;
@@ -312,7 +338,7 @@ session_line() {
   if [ "$now" -lt "$ends" ]; then
     say "  focus    on until $(clock_at "$ends") ($(( (ends - now + 59) / 60 )) min left)"
   else
-    say "  focus    session ended at $(clock_at "$ends") - run: sh freebuff-focus.sh unfocus"
+    say "  focus    session ended at $(clock_at "$ends") - run: $(cmdname) unfocus"
   fi
 }
 
@@ -779,12 +805,22 @@ next_steps() {
   say "  scan          every anchor this build contains - read-only"
   say "  revert        restore the pristine backup"
   say "  doctor        environment report"
+  say "  update        fetch the newest tool, replace it, then patch again"
+  say "  uninstall     remove the command; the patch stays"
   say "  help          every command and option"
   say ""
-  say "  Run them as:  sh freebuff-focus.sh <command>"
-  if [ "${HAVE_LOCAL:-0}" != "1" ]; then
-    say "  No local copy (this run came through curl)? Save one first:"
-    say "    curl -fsSL $ORIGIN/downloads/freebuff-focus-desktop.sh -o freebuff-focus.sh"
+  # Once the command exists, name it: that is the whole point of installing it.
+  if [ -x "$BIN_DIR/$COMMAND_NAME" ]; then
+    say "  Run them as:  $COMMAND_NAME <command>"
+    if ! path_has_bin; then
+      say "  ${DIM}($BIN_DIR is not on PATH in this shell - open a new terminal)${OFF}"
+    fi
+  else
+    say "  Run them as:  $(cmdname) <command>"
+    if [ "${HAVE_LOCAL:-0}" != "1" ]; then
+      say "  No local copy (this run came through curl)? Install the command once:"
+      say "    curl -fsSL $ORIGIN/downloads/freebuff-focus-desktop.sh | sh"
+    fi
   fi
 }
 
@@ -819,7 +855,7 @@ cmd_help() {
   say "Blocks the ads Freebuff Desktop renders from its bundled orchestrator."
   say ""
   say "${B}usage${OFF}"
-  say "  sh freebuff-focus.sh [command] [options]"
+  say "  $(cmdname) [command] [options]"
   say ""
   say "${B}commands${OFF}"
   say "  install   patch the app (default; backs up first, then restarts it)"
@@ -830,6 +866,9 @@ cmd_help() {
   say "  scan      show every anchor this build has - changes nothing"
   say "  revert    restore the pristine backup"
   say "  doctor    environment report"
+  say "  setup     install the tool and the $COMMAND_NAME command (piped runs do this)"
+  say "  update    fetch the latest tool, replace this copy, then patch again"
+  say "  uninstall  remove the command and the installed copy; the patch stays"
   say "  version   print the tool version"
   say ""
   say "${B}options${OFF}"
@@ -843,6 +882,8 @@ cmd_help() {
   say "  --session-dir PATH where a focus session is recorded"
   say "  --no-wait          verify: report now instead of waiting for the relaunch"
   say "  --timeout SECONDS  how long verify waits (default 300)"
+  say "  --add-path         setup: append ${BIN_DIR} to your shell rc"
+  say "  --force            update: reinstall even when the version matches"
   say ""
   say "A focus session is a timestamp on disk, not a process. It is 25m, 90m, 2h"
   say "or a plain number of minutes, and it does nothing on its own: ${B}unfocus${OFF}"
@@ -885,10 +926,10 @@ cmd_status() {
     if all_applied "$report"; then
       say ""
       say "  ${GREEN}Ads are off.${OFF} Quit Freebuff and reopen it, then check what it loaded:"
-      say "    sh freebuff-focus.sh verify"
+      say "    $(cmdname) verify"
     else
       say ""
-      say "  ${YELLOW}Not patched yet.${OFF} Run: sh freebuff-focus.sh install"
+      say "  ${YELLOW}Not patched yet.${OFF} Run: $(cmdname) install"
     fi
     return 0
   fi
@@ -898,11 +939,11 @@ cmd_status() {
   say "  Either it was already modified by another tool, or this Freebuff version"
   say "  changed the file. Nothing was written."
   say ""
-  say "  See what this build actually has:  sh freebuff-focus.sh scan"
+  say "  See what this build actually has:  $(cmdname) scan"
   say ""
   if [ -f "$BACKUP_DIR/orchestrator.js.$version.orig" ]; then
     say "  A pristine backup exists. Restore it, then install again:"
-    say "    sh freebuff-focus.sh revert && sh freebuff-focus.sh install"
+    say "    $(cmdname) revert && $(cmdname) install"
   else
     say "  If you patched this by hand before, restore the original file first."
   fi
@@ -932,14 +973,14 @@ cmd_install() {
     say "  Freebuff version changed the ad code."
     say ""
     say "  See what this build actually has:"
-    say "    sh freebuff-focus.sh scan                        (a local copy)"
+    say "    $(cmdname) scan                        (a local copy)"
     say "    curl -fsSL $ORIGIN/downloads/freebuff-focus-desktop.sh | sh -s scan"
     say "  Read-only either way. The piped one is for when you ran this through"
     say "  curl and have no local copy of the script to point at."
     say ""
     if [ -f "$BACKUP_DIR/orchestrator.js.$version.orig" ]; then
       say "  A pristine backup is on disk:"
-      say "    sh freebuff-focus.sh revert && sh freebuff-focus.sh install"
+      say "    $(cmdname) revert && $(cmdname) install"
       say "    curl -fsSL $ORIGIN/downloads/freebuff-focus-desktop.sh | sh -s revert"
     fi
     return 1
@@ -962,12 +1003,12 @@ cmd_install() {
     if [ -z "$running" ]; then
       say "  ${B}Next: open Freebuff.${OFF} The orchestrator is read once at launch,"
       say "  so the patch takes effect on the next start."
-      say "  Then check what it loaded:  sh freebuff-focus.sh verify"
+      say "  Then check what it loaded:  $(cmdname) verify"
     elif stale_process "$app" "$target"; then
       if [ "$RESTART" = "never" ]; then
         say "  ${B}Freebuff is running the bytes from before the patch.${OFF}"
         say "  Quit it completely and reopen it - focusing the window is not enough."
-        say "  Then check what it loaded:  sh freebuff-focus.sh verify"
+        say "  Then check what it loaded:  $(cmdname) verify"
       else
         say "  A process that started before the patch is still running it."
         if restart_app "$app"; then
@@ -1057,10 +1098,10 @@ cmd_install() {
       say "${B}Freebuff is running. Quit it completely (Cmd-Q) and reopen it.${OFF}"
       say "The orchestrator is read once at launch, so the patch only takes effect"
       say "on the next start - focusing the window is not enough."
-      say "  Then check what it loaded:  sh freebuff-focus.sh verify"
+      say "  Then check what it loaded:  $(cmdname) verify"
     else
       say "${B}Open Freebuff.${OFF} The patch takes effect on the next launch."
-      say "  Then check what it loaded:  sh freebuff-focus.sh verify"
+      say "  Then check what it loaded:  $(cmdname) verify"
     fi
   elif [ -n "$running" ] || [ "$RESTART" = "always" ]; then
     say "${B}Restarting Freebuff so the patch takes effect.${OFF}"
@@ -1074,22 +1115,197 @@ cmd_install() {
       if [ "$WAIT" = "1" ]; then
         verify_running "$app" "$target" || true
       else
-        say "  Then check what it loaded:  sh freebuff-focus.sh verify"
+        say "  Then check what it loaded:  $(cmdname) verify"
       fi
     else
       warn "could not restart Freebuff - quit it completely (Cmd-Q), reopen it, then:"
-      say "    sh freebuff-focus.sh verify"
+      say "    $(cmdname) verify"
     fi
   else
     say "${B}Open Freebuff.${OFF} The patch takes effect on the next launch."
-    say "  Then check what it loaded:  sh freebuff-focus.sh verify"
+    say "  Then check what it loaded:  $(cmdname) verify"
   fi
   say ""
   say "Undo any time: ${B}unfocus${OFF} ends a session."
-  say "Back to ads only: sh freebuff-focus.sh revert"
+  say "Back to ads only: $(cmdname) revert"
   say "After a Freebuff update, run ${B}install${OFF} again."
+  say "For a newer version of this tool itself: ${B}$(cmdname) update${OFF}"
   say ""
   next_steps
+}
+
+# --------------------------------------------------------------- the command
+
+path_has_bin() {
+  case ":${PATH:-}:" in *":$BIN_DIR:"*) return 0 ;; esac
+  return 1
+}
+
+# The rc file the login shell actually reads. zsh is the macOS default and bash
+# the Linux one; anything else gets .profile, which every POSIX shell reads.
+shell_rc() {
+  case "${SHELL:-}" in
+    */zsh)  printf '%s' "${ZDOTDIR:-$HOME}/.zshrc" ;;
+    */bash) printf '%s' "$HOME/.bashrc" ;;
+    *)      printf '%s' "$HOME/.profile" ;;
+  esac
+}
+
+# Append the bin folder once, behind a marker, so a second run cannot double it.
+add_to_path() {
+  rc="$(shell_rc)"
+  marker='# freebuff-focus PATH'
+  grep -qF "$marker" "$rc" 2>/dev/null && return 0
+  {
+    printf '\n%s\n' "$marker"
+    printf 'export PATH="%s:$PATH"\n' "$BIN_DIR"
+  } >>"$rc" 2>/dev/null || return 1
+  say "  path      added $BIN_DIR to $rc"
+  return 0
+}
+
+# The version a copy of this tool records. Empty means it is not this tool.
+version_of() {
+  sed -n 's/^VERSION="\(.*\)"$/\1/p' "$1" 2>/dev/null | head -n 1
+}
+
+# True when the first version is strictly newer than the second, dotted numbers
+# compared one field at a time. Used to refuse a downgrade: the site is the
+# authority on what is current, but it must never hand back something older than
+# what is already on disk and call it an update.
+version_newer() {
+  awk -v a="$1" -v b="$2" 'BEGIN {
+    n = split(a, x, "."); m = split(b, y, ".")
+    for (i = 1; i <= (n > m ? n : m); i++) {
+      if ((x[i] + 0) > (y[i] + 0)) exit 0
+      if ((x[i] + 0) < (y[i] + 0)) exit 1
+    }
+    exit 1
+  }'
+}
+
+# Install the tool and the command that runs it. The first `curl | sh` does this,
+# so the reader gets `freebuff-focusmode status` instead of a file they have to
+# name and a path they have to remember.
+cmd_setup() {
+  mkdir -p "$INSTALL_DIR" "$BIN_DIR" 2>/dev/null || die "cannot create $INSTALL_DIR or $BIN_DIR"
+
+  tmp="$INSTALLED_SELF.tmp.$$"
+  if [ "$HAVE_LOCAL" = "1" ] && [ -f "${0:-}" ]; then
+    # Exactly the code that is running: a local copy needs no second download.
+    cp "$0" "$tmp" || die "cannot write $tmp"
+  else
+    # stdin is already consumed by the interpreter, so the piped case downloads
+    # the same URL it came from rather than re-reading a stream that is gone.
+    curl -fsSL "$ORIGIN/downloads/freebuff-focus-desktop.sh" -o "$tmp" 2>/dev/null \
+      || { rm -f "$tmp"; die "cannot download the tool from $ORIGIN"; }
+    got="$(version_of "$tmp")"
+    [ -n "$got" ] || { rm -f "$tmp"; die "the download does not look like this tool - nothing was installed"; }
+    if [ "$got" != "$VERSION" ]; then
+      # A copy older than the code that is running is a stale site, not an
+      # update: installing it would hand back a tool missing this very command.
+      if version_newer "$VERSION" "$got"; then
+        rm -f "$tmp"
+        die "the site is serving $got while this run is $VERSION - nothing was installed. Try the one-liner again in a minute."
+      fi
+      warn "downloaded $got while running $VERSION - installing $got"
+    fi
+  fi
+
+  chmod 755 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$INSTALLED_SELF" || { rm -f "$tmp"; die "cannot install to $INSTALLED_SELF"; }
+
+  shim="$BIN_DIR/$COMMAND_NAME"
+  printf '#!/bin/sh\n# Freebuff Focus launcher - written by `%s setup`.\nexec sh "%s" "$@"\n' \
+    "$COMMAND_NAME" "$INSTALLED_SELF" >"$shim" 2>/dev/null \
+    || die "cannot write $shim"
+  chmod 755 "$shim" 2>/dev/null || die "cannot make $shim executable"
+
+  ok "installed $INSTALLED_SELF"
+  ok "command   $shim"
+
+  if path_has_bin; then
+    say "  ${DIM}$BIN_DIR is already on PATH${OFF}"
+  elif [ "$ADD_PATH" = "1" ]; then
+    add_to_path || warn "could not update $(shell_rc) - add $BIN_DIR to PATH yourself"
+    say "  Open a new terminal, then run:  $COMMAND_NAME status"
+  else
+    say ""
+    say "  ${B}$BIN_DIR is not on PATH yet.${OFF} Add it for good:"
+    say "    echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> $(shell_rc)"
+    say "  or rerun setup with --add-path and this is done for you."
+  fi
+}
+
+# Replace the installed copy with whatever the site serves now, keeping the old
+# one beside it, then run the new code so the patch is refreshed by the version
+# that will be used from now on.
+cmd_update() {
+  [ -f "$INSTALLED_SELF" ] || die "no installed copy yet - run: curl -fsSL $ORIGIN/downloads/freebuff-focus-desktop.sh | sh"
+
+  say "${B}Freebuff Focus${OFF} - update"
+  old="$(version_of "$INSTALLED_SELF")"
+  say "  installed  ${old:-unknown}"
+
+  tmp="$INSTALLED_SELF.new.$$"
+  curl -fsSL "$ORIGIN/downloads/freebuff-focus-desktop.sh" -o "$tmp" 2>/dev/null \
+    || { rm -f "$tmp"; die "cannot reach $ORIGIN - nothing was changed"; }
+  new="$(version_of "$tmp")"
+  [ -n "$new" ] || { rm -f "$tmp"; die "the download does not look like this tool - kept the installed copy"; }
+  say "  available  $new"
+
+  if [ "$new" = "$old" ] && [ "$FORCE" != "1" ]; then
+    rm -f "$tmp"
+    ok "already up to date"
+    return 0
+  fi
+
+  if [ "$FORCE" != "1" ] && version_newer "${old:-0}" "$new"; then
+    rm -f "$tmp"
+    die "the site is serving $new, which is older than the installed ${old:-?} - nothing was changed"
+  fi
+
+  cp "$INSTALLED_SELF" "$INSTALLED_SELF.prev" 2>/dev/null || true
+  chmod 755 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$INSTALLED_SELF" || { rm -f "$tmp"; die "cannot replace $INSTALLED_SELF"; }
+  ok "updated    ${old:-unknown} -> $new"
+  say "  previous   $INSTALLED_SELF.prev"
+  say ""
+
+  # Hand over to the copy that was just installed, with the settings this run was
+  # given: the new version does the patching, and --app / --backup-dir / --no-wait
+  # survive the handover instead of sending the reader back to the defaults.
+  set -- install
+  [ -n "$APP" ] && set -- "$@" --app "$APP"
+  set -- "$@" --backup-dir "$BACKUP_DIR"
+  set -- "$@" --session-dir "$SESSION_DIR"
+  case "$RESTART" in
+    always) set -- "$@" --restart ;;
+    never)  set -- "$@" --no-restart ;;
+  esac
+  [ "$WAIT" = "1" ] || set -- "$@" --no-wait
+  set -- "$@" --timeout "$WAIT_SECS"
+
+  exec sh "$INSTALLED_SELF" "$@"
+}
+
+# Remove the command and the installed copy. The patch is left alone on purpose:
+# taking away the tool that can undo it must not also take away the undo.
+cmd_uninstall() {
+  shim="$BIN_DIR/$COMMAND_NAME"
+  removed=0
+  if [ -f "$shim" ]; then rm -f "$shim" && { ok "removed $shim"; removed=1; }; fi
+  if [ -f "$INSTALLED_SELF" ]; then
+    rm -f "$INSTALLED_SELF" "$INSTALLED_SELF.prev" && { ok "removed $INSTALLED_SELF"; removed=1; }
+  fi
+
+  if [ "$removed" = "0" ]; then
+    say "  Nothing was installed here."
+    return 0
+  fi
+  say ""
+  say "  The patch is still applied. Restore the ads first next time, with a fresh copy:"
+  say "    curl -fsSL $ORIGIN/downloads/freebuff-focus-desktop.sh | sh -s revert"
 }
 
 cmd_revert() {
@@ -1234,14 +1450,14 @@ cmd_verify() {
     bad "This orchestrator.js does not match what the tool expects."
     say "  There is nothing of this tool's to verify, and nothing was written."
     say ""
-    say "  See what this build actually has:  sh freebuff-focus.sh scan"
+    say "  See what this build actually has:  $(cmdname) scan"
     return 1
   fi
 
   if ! all_applied "$report"; then
     render_report "$report"
     say ""
-    say "  ${YELLOW}Not patched yet.${OFF} Run: sh freebuff-focus.sh install"
+    say "  ${YELLOW}Not patched yet.${OFF} Run: $(cmdname) install"
     return 1
   fi
 
@@ -1312,7 +1528,7 @@ verify_running() {
       say ""
       say "  ${YELLOW}Not verified.${OFF} This check needs Freebuff running the patched"
       say "  file. Quit it completely (Cmd-Q), reopen it, then run it again:"
-      say "    sh freebuff-focus.sh verify"
+      say "    $(cmdname) verify"
       trap - INT
       return 1
     fi
@@ -1327,7 +1543,7 @@ verify_running() {
       say ""
       say "  ${YELLOW}Stopped waiting.${OFF} The patch itself is fine - this check only"
       say "  needs the relaunch. Run it again once Freebuff is open:"
-      say "    sh freebuff-focus.sh verify"
+      say "    $(cmdname) verify"
       trap - INT
       return 1
     fi
@@ -1355,7 +1571,7 @@ cmd_focus() {
 
   say ""
   say "${B}Focus until $(clock_at "$ends").${OFF} Ads come back when you end it:"
-  say "    sh freebuff-focus.sh unfocus"
+  say "    $(cmdname) unfocus"
   say "There is no timer process. A session that runs out leaves the patch where"
   say "it is until you run that, which is stated here rather than pretended away."
 }
@@ -1375,7 +1591,11 @@ cmd_unfocus() {
 }
 
 case "$COMMAND" in
-  install) cmd_install ;;
+  install)
+    # The one-liner is the install path: a piped run with no file behind it puts
+    # the command on the machine first, then patches. A local copy just patches.
+    [ "$HAVE_LOCAL" = "1" ] || cmd_setup
+    cmd_install ;;
   focus)   cmd_focus ;;
   unfocus) cmd_unfocus ;;
   status)  cmd_status ;;
@@ -1383,6 +1603,9 @@ case "$COMMAND" in
   revert)  cmd_revert ;;
   doctor)  cmd_doctor ;;
   scan)    cmd_scan ;;
+  setup)     cmd_setup ;;
+  update)    cmd_update ;;
+  uninstall) cmd_uninstall ;;
   version) cmd_version ;;
   help)    cmd_help ;;
   *)       die "unknown command: $COMMAND" ;;

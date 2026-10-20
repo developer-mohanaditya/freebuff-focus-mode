@@ -67,7 +67,27 @@ for (const bin of ['sh', 'perl', 'pgrep', 'ps']) {
 }
 const TOOL_SOURCE = read(TOOL);
 
+/** The tool as it is served: stamped, so versions can be compared for real. */
+const FIXTURE_VERSION = '1.8.0';
+const STAMPED_SOURCE = TOOL_SOURCE.replaceAll('__FBD_VERSION__', FIXTURE_VERSION).replaceAll(
+  '__FBD_ORIGIN__',
+  'https://focus.test'
+);
+const STAMPED_TOOL = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fbd-linux-stamped-')), 'freebuff-focus-linux.sh');
+fs.writeFileSync(STAMPED_TOOL, STAMPED_SOURCE);
+
 /* ------------------------------------------------------------------ fixtures */
+
+/** A served copy beside the tree, so setup and update never need the network. */
+function makeOrigin(root, version = FIXTURE_VERSION) {
+  const dir = path.join(root, 'origin');
+  fs.mkdirSync(path.join(dir, 'downloads'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'downloads', 'freebuff-focus-desktop-linux.sh'), served(version));
+  return `file://${dir}`;
+}
+
+const served = (version) =>
+  TOOL_SOURCE.replaceAll('__FBD_VERSION__', version).replaceAll('__FBD_ORIGIN__', 'https://focus.test');
 
 function makeTree(body = CURRENT, name = 'Freebuff.AppDir') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fbd-linux-'));
@@ -75,7 +95,31 @@ function makeTree(body = CURRENT, name = 'Freebuff.AppDir') {
   fs.mkdirSync(path.join(tree, 'resources', 'orchestrator'), { recursive: true });
   const target = path.join(tree, ORCH);
   fs.writeFileSync(target, body);
-  return { root, tree, target, backups: path.join(root, 'backups'), work: path.join(root, 'work') };
+  return {
+    root,
+    tree,
+    target,
+    backups: path.join(root, 'backups'),
+    work: path.join(root, 'work'),
+    origin: makeOrigin(root),
+    home: path.join(root, 'focus-home'),
+    bin: path.join(root, 'focus-bin'),
+  };
+}
+
+/**
+ * Where an install would land, per fixture. Without these, `setup` would write a
+ * command into the real ~/.local/bin of whatever machine runs this suite.
+ */
+function toolEnv(tree, extra = {}) {
+  const root = path.dirname(tree);
+  return {
+    ...process.env,
+    FREEBUFF_FOCUS_HOME: path.join(root, 'focus-home'),
+    FREEBUFF_FOCUS_BIN_DIR: path.join(root, 'focus-bin'),
+    FREEBUFF_FOCUS_ORIGIN: `file://${path.join(root, 'origin')}`,
+    ...extra,
+  };
 }
 
 /** The version an extracted AppDir records, which is what names the backup. */
@@ -88,13 +132,32 @@ const run = (tree, backups, ...args) =>
     encoding: 'utf8',
     cwd: os.tmpdir(),
     timeout: 120000,
+    env: toolEnv(tree),
   });
+
+const runStamped = (tree, backups, ...args) =>
+  spawnSync('sh', [STAMPED_TOOL, ...args, '--app', tree, '--backup-dir', backups], {
+    encoding: 'utf8',
+    cwd: os.tmpdir(),
+    timeout: 120000,
+    env: toolEnv(tree),
+  });
+
+/** The installed command, run the way a shell would run it: by name. */
+function runCommand(fixture, ...args) {
+  return spawnSync(path.join(fixture.bin, 'freebuff-focusmode'), args, {
+    encoding: 'utf8',
+    cwd: os.tmpdir(),
+    timeout: 120000,
+    env: toolEnv(fixture.tree, { PATH: `${fixture.bin}:${process.env.PATH}` }),
+  });
+}
 
 const runWithWork = (tree, backups, work, ...args) =>
   spawnSync(
     'sh',
     [TOOL, ...args, '--app', tree, '--backup-dir', backups, '--work-dir', work],
-    { encoding: 'utf8', cwd: os.tmpdir(), timeout: 180000 }
+    { encoding: 'utf8', cwd: os.tmpdir(), timeout: 180000, env: toolEnv(tree) }
   );
 
 /* ------------------------------------------------------------------- pristine */
@@ -568,6 +631,65 @@ check('it clears the session file', fs.existsSync(sessionFile), false);
 const badDuration = run(focusTree.tree, focusTree.backups, 'focus', 'soon', '--session-dir', sessionDir);
 check('a duration that is not a duration is refused', badDuration.status !== 0, true);
 check('and it says what one looks like', /duration like 25m/.test(both(badDuration)), true);
+
+console.log('\nthe freebuff-focusmode command');
+const cmdTree = makeTree();
+const setup = runStamped(cmdTree.tree, cmdTree.backups, 'setup');
+const shim = path.join(cmdTree.bin, 'freebuff-focusmode');
+check('setup exits 0', setup.status, 0);
+check('it writes the command', fs.existsSync(shim), true);
+check('the command is executable', (fs.statSync(shim).mode & 0o111) !== 0, true);
+check('it installs the tool itself', fs.existsSync(path.join(cmdTree.home, 'freebuff-focus-linux.sh')), true);
+check('and says where both went', setup.stdout.includes(cmdTree.home) && setup.stdout.includes(shim), true);
+check('and does not patch anything yet', read(cmdTree.target) === CURRENT, true);
+check('setup again is not an error', runStamped(cmdTree.tree, cmdTree.backups, 'setup').status, 0);
+
+const viaCommand = runCommand(cmdTree, 'version');
+check('the command runs the tool', viaCommand.status, 0);
+check('and reports the tool version', /freebuff-focus-desktop-linux 1\.8\.0/.test(viaCommand.stdout), true);
+const commandStatus = runCommand(cmdTree, 'status', '--app', cmdTree.tree, '--backup-dir', cmdTree.backups);
+check('arguments reach the tool through the command', /Not patched yet/.test(commandStatus.stdout), true);
+
+const added = spawnSync('sh', [STAMPED_TOOL, 'setup', '--add-path'], {
+  encoding: 'utf8',
+  env: toolEnv(cmdTree.tree, { HOME: cmdTree.root, SHELL: '/bin/bash' }),
+});
+spawnSync('sh', [STAMPED_TOOL, 'setup', '--add-path'], {
+  encoding: 'utf8',
+  env: toolEnv(cmdTree.tree, { HOME: cmdTree.root, SHELL: '/bin/bash' }),
+});
+const rc = path.join(cmdTree.root, '.bashrc');
+check('--add-path exits 0', added.status, 0);
+check('it adds the folder to the shell rc', fs.existsSync(rc) && read(rc).includes(cmdTree.bin), true);
+check('and only once, however often setup runs', count(read(rc), '# freebuff-focus PATH'), 1);
+
+const updateTree = makeTree();
+runStamped(updateTree.tree, updateTree.backups, 'setup');
+makeOrigin(updateTree.root, '1.8.1');
+const updated = runCommand(updateTree, 'update', '--app', updateTree.tree, '--backup-dir', updateTree.backups);
+check('update exits 0', updated.status, 0);
+check('it names both versions', /1\.8\.0 -> 1\.8\.1/.test(updated.stdout), true);
+check('the installed copy is the new one', /VERSION="1\.8\.1"/.test(read(path.join(updateTree.home, 'freebuff-focus-linux.sh'))), true);
+check('the copy it replaced is kept', fs.existsSync(path.join(updateTree.home, 'freebuff-focus-linux.sh.prev')), true);
+check('and it patches with the new copy', count(read(updateTree.target), '/*FBD-ADS-OFF:render*/'), 1);
+check('and names the command once more at the end', /Run them as:\s+freebuff-focusmode/.test(updated.stdout), true);
+
+const current = runCommand(updateTree, 'update');
+check('a second update says it is already current', /already up to date/.test(current.stdout), true);
+check('and exits 0', current.status, 0);
+
+makeOrigin(updateTree.root, '1.7.9');
+const older = runCommand(updateTree, 'update');
+check('an older served copy is refused', older.status !== 0, true);
+check('and it says which way round they are', /older than the installed/.test(older.stderr), true);
+check('and the installed copy is untouched', /VERSION="1\.8\.1"/.test(read(path.join(updateTree.home, 'freebuff-focus-linux.sh'))), true);
+
+const removed = runCommand(updateTree, 'uninstall');
+check('uninstall exits 0', removed.status, 0);
+check('it removes the command', fs.existsSync(path.join(updateTree.bin, 'freebuff-focusmode')), false);
+check('and the installed copy', fs.existsSync(path.join(updateTree.home, 'freebuff-focus-linux.sh')), false);
+check('and says the patch is still applied', /patch is still applied/.test(removed.stdout), true);
+check('and the patch really is still applied', count(read(updateTree.target), '/*FBD-ADS-OFF:render*/'), 1);
 
 console.log('\nthe script itself');
 const syntax = spawnSync('sh', ['-n', TOOL], { encoding: 'utf8' });
