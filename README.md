@@ -8,8 +8,8 @@ you are done, and everything returns, so free models stay free.
 
 Unofficial community project. Not affiliated with Freebuff or Codebuff.
 
-[Install it](https://freebuff-focus-mode.vercel.app/) ·
-[Privacy policy](https://freebuff-focus-mode.vercel.app/privacy) ·
+[Install it](https://freebuff-focusmode.vercel.app/) ·
+[Privacy policy](https://freebuff-focusmode.vercel.app/privacy) ·
 [Report an issue](https://github.com/developer-mohanaditya/freebuff-focus-mode/issues)
 
 ## Why focus, not block
@@ -34,14 +34,14 @@ has its own local tools. See the For Desktop section on the install page.
 
 ```sh
 # macOS / Linux
-curl -fsSL https://freebuff-focus-mode.vercel.app/downloads/freebuff-focus-desktop.sh | sh
+curl -fsSL https://freebuff-focusmode.vercel.app/downloads/freebuff-focus-desktop.sh | sh
 sh freebuff-focus.sh focus 25m   # quiet for the work block
 sh freebuff-focus.sh unfocus     # bring ads back after
 ```
 
 ```powershell
 # Windows
-irm https://freebuff-focus-mode.vercel.app/downloads/freebuff-focus-desktop.ps1 | iex
+irm https://freebuff-focusmode.vercel.app/downloads/freebuff-focus-desktop.ps1 | iex
 ```
 
 The tool restarts Freebuff itself, then checks that the running process read the patched
@@ -68,7 +68,7 @@ confirms the running app loaded the file, `scan` shows what a new build contains
 
 No server, no analytics, no accounts. Stored locally only: your focus setting and element
 rules you create. Full policy on the
-[site](https://freebuff-focus-mode.vercel.app/privacy).
+[site](https://freebuff-focusmode.vercel.app/privacy).
 
 ## Develop
 
