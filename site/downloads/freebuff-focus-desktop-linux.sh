@@ -72,7 +72,7 @@ set -u
 
 # Stamped at build time (scripts/build-desktop.mjs).
 VERSION="1.7.0"
-ORIGIN="https://freebuff-focus-mode.vercel.app"
+ORIGIN="https://freebuff-focusmode.vercel.app"
 
 # Whether this run has the script on disk. `curl | sh` does not, so a hint that
 # says "sh freebuff-focus-linux.sh status" would point at a file that is not there.

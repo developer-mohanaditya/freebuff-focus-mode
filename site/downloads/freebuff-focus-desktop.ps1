@@ -30,8 +30,8 @@ blocked write gets). It disables the ad runtime in place:
 Usage, from a PowerShell prompt (PowerShell ships with every Windows, so there
 is nothing to install first):
 
-  irm https://freebuff-focus-mode.vercel.app/downloads/freebuff-focus-desktop.ps1 | iex           # install (the default)
-  $s = irm https://freebuff-focus-mode.vercel.app/downloads/freebuff-focus-desktop.ps1
+  irm https://freebuff-focusmode.vercel.app/downloads/freebuff-focus-desktop.ps1 | iex           # install (the default)
+  $s = irm https://freebuff-focusmode.vercel.app/downloads/freebuff-focus-desktop.ps1
   & ([scriptblock]::Create($s)) status                                      # any other command
 
   powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 scan       # a local copy
@@ -84,7 +84,7 @@ if ($null -eq $Arguments) { $Arguments = @() }
 
 # Stamped at build time (scripts/build-desktop.mjs).
 $Version = '1.7.0'
-$Origin = 'https://freebuff-focus-mode.vercel.app'
+$Origin = 'https://freebuff-focusmode.vercel.app'
 
 # Whether this run has the script on disk. `irm ... | iex` does not, so a hint
 # that says `.\freebuff-focus.ps1 status` would point at a file that is not there.

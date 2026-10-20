@@ -15,7 +15,7 @@ const LEGACY_ENABLED_KEY = 'freebuffAdBlockEnabled';
 const LEGACY_CUSTOM_KEY = 'freebuffAdBlockSelectors';
 
 // Kept in sync with SITE_ORIGIN in scripts/build.mjs.
-const INSTALL_URL = 'https://freebuff-focus-mode.vercel.app/';
+const INSTALL_URL = 'https://freebuff-focusmode.vercel.app/';
 
 const toggle = document.getElementById('toggle');
 const stateText = document.getElementById('stateText');
