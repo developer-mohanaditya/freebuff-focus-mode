@@ -128,6 +128,15 @@ const again = run(a.app, a.backups, 'install');
 check('second install exits 0', again.status, 0);
 check('it reports already patched', /Already patched/.test(again.stdout));
 
+// A run with nothing to write is only worth what it reports. These are the four
+// things a reader needs and "Nothing to do" did not give them: which anchors are
+// in place, whether a session is running, what the tool can do next, and - for a
+// curl run - how to get a copy of the script to run those commands with.
+check('it lists the anchors already in place', /render\s+applied/.test(again.stdout) && /request\s+applied/.test(again.stdout));
+check('it says there is no session', /session\s+none/.test(again.stdout));
+check('it prints the commands the tool has', ['status', 'focus 25m', 'unfocus', 'verify', 'scan', 'revert', 'doctor', 'help'].every((c) => again.stdout.includes(c)));
+check('the local run does not tell you to download the script', /No local copy/.test(again.stdout), false);
+
 const twice = read(a.target);
 check('the render patch did not stack', count(twice, '/*FBD-ADS-OFF:render*/'), 1);
 check('the request patch did not stack', count(twice, '/*FBD-ADS-OFF:request*/'), 1);
@@ -261,6 +270,16 @@ const pipedScan = runPiped(j.app, j.backups, 'scan');
 check('`sh -s scan` exits 0', pipedScan.status, 0);
 check('and prints the scan report', /== render ==/.test(pipedScan.stdout));
 check('and names the tool version it is running', /anchor scan \(tool \S+\)/.test(pipedScan.stdout));
+
+// The piped run has no script on disk, so "sh freebuff-focus.sh verify" would be
+// a command they cannot run. It has to say what to save first. A fresh bundle,
+// because `a` has been reverted by the time this runs.
+const k = makeBundle();
+run(k.app, k.backups, 'install');
+const pipedAgain = runPiped(k.app, k.backups, 'install');
+check('a piped second install still reports already patched', /Already patched/.test(pipedAgain.stdout));
+check('and, with no file on disk, says how to save one', /No local copy/.test(pipedAgain.stdout));
+check('naming the real download it came from', /downloads\/freebuff-focus-desktop\.sh/.test(pipedAgain.stdout));
 
 /* ------------------------------------------------------------------ verify */
 

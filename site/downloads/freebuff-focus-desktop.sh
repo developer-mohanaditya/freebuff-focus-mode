@@ -60,6 +60,11 @@ set -u
 VERSION="1.7.0"
 ORIGIN="https://freebuff-focus-mode.vercel.app"
 
+# Whether this run has the script on disk. `curl | sh` does not, so a hint that
+# says "sh freebuff-focus.sh status" would point at a file that is not there.
+HAVE_LOCAL=0
+[ -f "${0:-}" ] && HAVE_LOCAL=1
+
 # The backup folder keeps its 1.6 name on purpose: renaming it would orphan every
 # pristine copy an existing install already wrote, and those are exactly what
 # `revert` restores. The override is new; the old one still works.
@@ -762,6 +767,27 @@ all_applied() {
   printf '%s\n' "$1" | awk -F'|' '$1=="PATCH" && $3=="ready" { n++ } END { exit (n>0) }'
 }
 
+# Everything this tool can do, at the one moment a reader cares: right after an
+# install that found nothing to write. Printed by install only - `status` stays a
+# report and `help` stays the long form.
+next_steps() {
+  say "  ${B}What this tool can do${OFF}"
+  say "  status        what is applied, and any session - changes nothing"
+  say "  focus 25m     start a session: 25m, 90m, 2h, or plain minutes"
+  say "  unfocus       end the session and bring the ads back"
+  say "  verify        wait for a relaunch, then check what it loaded"
+  say "  scan          every anchor this build contains - read-only"
+  say "  revert        restore the pristine backup"
+  say "  doctor        environment report"
+  say "  help          every command and option"
+  say ""
+  say "  Run them as:  sh freebuff-focus.sh <command>"
+  if [ "${HAVE_LOCAL:-0}" != "1" ]; then
+    say "  No local copy (this run came through curl)? Save one first:"
+    say "    curl -fsSL $ORIGIN/downloads/freebuff-focus-desktop.sh -o freebuff-focus.sh"
+  fi
+}
+
 writable() {
   probe="$1.fbd-probe"
   if ( : > "$probe" ) 2>/dev/null; then rm -f "$probe"; return 0; fi
@@ -920,20 +946,43 @@ cmd_install() {
   fi
 
   if all_applied "$report"; then
-    say "  ${GREEN}Already patched.${OFF} Nothing to do."
-    # Nothing to write, but there can still be a process reading the old bytes.
-    # That is the only useful thing left to do here, so it is the only thing done.
-    if [ "$RESTART" != "never" ] && stale_process "$app" "$target"; then
-      say "  A process that started before the patch is still running it."
-      if restart_app "$app"; then
-        say "  restarted Freebuff"
-        [ "$WAIT" = "1" ] && { verify_running "$app" "$target" || true; }
+    # Nothing to write, so this run is worth only what it reports: which anchors
+    # are already in place, whether a session is running, whether the process
+    # you are looking at is reading the patched bytes, and what else the tool
+    # can do from here. "Nothing to do" alone answered none of that.
+    say "  ${GREEN}Already patched.${OFF} Every anchor in this build is already replaced."
+    render_report "$report"
+    session_line
+    if [ -z "$(session_ends)" ]; then
+      say "  session  none - ads stay off until you revert"
+    fi
+    say ""
+
+    running="$(orchestrator_pids "$app")"
+    if [ -z "$running" ]; then
+      say "  ${B}Next: open Freebuff.${OFF} The orchestrator is read once at launch,"
+      say "  so the patch takes effect on the next start."
+      say "  Then check what it loaded:  sh freebuff-focus.sh verify"
+    elif stale_process "$app" "$target"; then
+      if [ "$RESTART" = "never" ]; then
+        say "  ${B}Freebuff is running the bytes from before the patch.${OFF}"
+        say "  Quit it completely and reopen it - focusing the window is not enough."
+        say "  Then check what it loaded:  sh freebuff-focus.sh verify"
       else
-        warn "could not restart Freebuff - quit it yourself and open it again"
+        say "  A process that started before the patch is still running it."
+        if restart_app "$app"; then
+          say "  restarted Freebuff"
+          [ "$WAIT" = "1" ] && { verify_running "$app" "$target" || true; }
+        else
+          warn "could not restart Freebuff - quit it yourself and open it again"
+        fi
       fi
     else
-      say "  Quit Freebuff and reopen it if ads are still showing."
+      say "  ${B}Freebuff is running the patched file.${OFF} Ads are off in that window."
     fi
+
+    say ""
+    next_steps
     return 0
   fi
 
@@ -1036,9 +1085,11 @@ cmd_install() {
     say "  Then check what it loaded:  sh freebuff-focus.sh verify"
   fi
   say ""
-  say "Undo any time:    sh freebuff-focus.sh unfocus"
+  say "Undo any time: ${B}unfocus${OFF} ends a session."
   say "Back to ads only: sh freebuff-focus.sh revert"
-  say "After a Freebuff update, re-run:  sh freebuff-focus.sh install"
+  say "After a Freebuff update, run ${B}install${OFF} again."
+  say ""
+  next_steps
 }
 
 cmd_revert() {

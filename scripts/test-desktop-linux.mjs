@@ -154,6 +154,12 @@ console.log('\ninstall twice');
 const again = run(a.tree, a.backups, 'install', '--no-wait');
 check('second install exits 0', again.status, 0);
 check('it reports already patched', /Already patched/.test(again.stdout), true);
+// Nothing to write means the run is worth only what it reports: the anchors in
+// place, the session, the process state, and the commands left to use.
+check('it lists the anchors already in place', /render\s+applied/.test(again.stdout) && /request\s+applied/.test(again.stdout), true);
+check('it says there is no session', /session\s+none/.test(again.stdout), true);
+check('it prints the commands the tool has', ['status', 'focus 25m', 'unfocus', 'verify', 'scan', 'revert', 'doctor', 'help'].every((c) => again.stdout.includes(c)), true);
+check('the local run does not tell you to download the script', /No local copy/.test(again.stdout), false);
 check('the render patch did not stack', count(read(a.target), '/*FBD-ADS-OFF:render*/'), 1);
 check('the request patch did not stack', count(read(a.target), '/*FBD-ADS-OFF:request*/'), 1);
 check('the file is byte-identical to the first patch', read(a.target) === patched, true);
