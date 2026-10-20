@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Freebuff Focus Mode",
   "short_name": "FB Focus",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Quiet focus sessions for freebuff.com. Ads on by default, hidden only while you focus.",
   "permissions": [
     "declarativeNetRequest",
