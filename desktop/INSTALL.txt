@@ -37,6 +37,28 @@ app bundle. If you see "Operation not permitted", open:
 switch on Terminal (or whichever app you ran this from), quit and reopen that
 app, and run the tool again. It never asks for a password and never uses sudo.
 
+INSTALL IT AS A COMMAND
+-----------------------
+
+Run this once and you stop naming a file:
+
+  sh freebuff-focus.sh setup
+
+It copies the tool to ~/.local/share/freebuff-focus, writes
+`freebuff-focusmode` into ~/.local/bin, and prints the one line to add that
+folder to your PATH if it is not there already. `setup --add-path` edits your
+shell rc instead of telling you to. After that:
+
+  freebuff-focusmode status     report what is applied - changes nothing
+  freebuff-focusmode focus 25m  start a session
+  freebuff-focusmode unfocus    end it, and bring the ads back
+  freebuff-focusmode update     fetch a newer tool, replace this copy, patch again
+  freebuff-focusmode uninstall  remove the command; the patch stays
+
+The one-liner on the install page does this for you, which is why the piped form
+is the shorter path rather than the longer one.
+
+
 OTHER COMMANDS
 --------------
 
@@ -67,7 +89,9 @@ AFTER A FREEBUFF UPDATE
 -----------------------
 
 Every update replaces the app's Resources folder, so the patch goes away. Run
-install again after an update.
+install again after an update. For a newer version of this tool itself, run
+`freebuff-focusmode update` once it is installed (or `sh freebuff-focus.sh
+update`, which replaces that copy in place and then patches again).
 
 An update can also change the code the tool looks for. Each anchor has a
 literal form and a relaxed one; the relaxed form is only used when it appears

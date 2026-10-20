@@ -32,22 +32,33 @@ machine.
 **Desktop app** (macOS, Windows, Linux): the desktop bundle has no extension surface, so it
 has its own local tools. See the For Desktop section on the install page.
 
+The one-liner installs the tool, puts a `freebuff-focusmode` command on your PATH, and
+patches the app in one go - after that, curl is not needed again.
+
 ```sh
 # macOS / Linux
 curl -fsSL https://freebuff-focusmode.vercel.app/downloads/freebuff-focus-desktop.sh | sh
-sh freebuff-focus.sh focus 25m   # quiet for the work block
-sh freebuff-focus.sh unfocus     # bring ads back after
+freebuff-focusmode focus 25m   # quiet for the work block
+freebuff-focusmode unfocus     # bring ads back after
+freebuff-focusmode update      # newer tool: download it, replace the copy, patch again
 ```
 
 ```powershell
 # Windows
 irm https://freebuff-focusmode.vercel.app/downloads/freebuff-focus-desktop.ps1 | iex
+freebuff-focusmode focus 25m
 ```
 
+The installer prints the one line to add if `~/.local/bin` (or
+`%LOCALAPPDATA%\FreebuffFocus\bin`) is not on your PATH yet; rerunning the same line with
+`--add-path` (`-AddPath` on Windows) does it for you. `freebuff-focusmode uninstall` removes
+the command and the installed copy and leaves the patch alone, so removing the tool never
+removes the undo.
+
 The tool restarts Freebuff itself, then checks that the running process read the patched
-file. Every Freebuff update replaces the patched files, so run it again after an update.
-A session is the patch plus an end time: `status` prints when it lifts, and nothing runs in
-the background - `unfocus` is what puts the ads back.
+file. Every Freebuff update replaces the patched files, so run `install` again after an
+update. A session is the patch plus an end time: `status` prints when it lifts, and nothing
+runs in the background - `unfocus` is what puts the ads back.
 
 ## How it works
 
