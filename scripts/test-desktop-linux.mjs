@@ -115,7 +115,10 @@ check('and it does not offer a macOS-only option', help.stdout.includes('--resig
 
 const clean = run(a.tree, a.backups, 'status');
 check('status exits 0', clean.status, 0);
-check('it reads the AppDir version', /version\s+0\.0\.164/.test(clean.stdout), true);
+// The label says whose version it is: 0.0.164 is the installed Freebuff, not the
+// tool, and "version" alone read as the latter.
+check('it reports the installed Freebuff version', /freebuff\s+0\.0\.164 \(installed\)/.test(clean.stdout), true);
+check('and does not label it as the tool version', /^\s+version\s+0\.0\.164/m.test(clean.stdout), false);
 check('it reports both anchors', /render/.test(clean.stdout) && /request/.test(clean.stdout), true);
 check('and says it is not patched yet', /Not patched yet/.test(clean.stdout), true);
 check('status changes nothing', read(a.target) === CURRENT, true);
@@ -442,7 +445,7 @@ if (!hasCompiler) {
     fs.copyFileSync(img.image, renamed);
     fs.chmodSync(renamed, 0o755);
     const out = runWithWork(renamed, backups, path.join(root, `w-${want}`), 'status');
-    check(`a file named ${name} reads as ${want}`, new RegExp(`version\\s+${want.replace('.', '\\.')}`).test(out.stdout), true);
+    check(`a file named ${name} reads as ${want}`, new RegExp(`freebuff\\s+${want.replace('.', '\\.')}`).test(out.stdout), true);
   }
 
   console.log('\nnot an AppImage at all');
@@ -476,7 +479,7 @@ const discovered = spawnSync('sh', [TOOL, 'status'], {
 });
 if (hasCompiler) {
   check('it finds the AppImage in ~/Applications with no --app', /image\s+\S+Applications\/Freebuff-7\.7\.7/.test(discovered.stdout), true);
-  check('and reads its version out of the file name', /version\s+7\.7\.7/.test(discovered.stdout), true);
+  check('and reads its version out of the file name', /freebuff\s+7\.7\.7/.test(discovered.stdout), true);
 } else {
   console.log('  ..    the ~/Applications discovery check needs the compiled AppImage');
 }

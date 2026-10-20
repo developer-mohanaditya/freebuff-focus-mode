@@ -103,6 +103,9 @@ check('status changes nothing', read(a.target) === CURRENT);
 console.log('\ninstall');
 const install = run(a.app, a.backups, 'install');
 check('install exits 0', install.status, 0);
+// The header names whose version it is printing. A macOS fixture has no
+// Info.plist, so the value here is "unknown" - the label is what is under test.
+check('the header credits the installed app for the version', /freebuff\s+\S+ \(installed\)/.test(install.stdout));
 
 const patched = read(a.target);
 check('the one render gate is neutralised', count(patched, 'if (true/*FBD-ADS-OFF:render*/)'), 1);
