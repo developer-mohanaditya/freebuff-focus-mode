@@ -83,7 +83,7 @@ param(
 if ($null -eq $Arguments) { $Arguments = @() }
 
 # Stamped at build time (scripts/build-desktop.mjs).
-$Version = '1.7.0'
+$Version = '1.7.1'
 $Origin = 'https://freebuff-focusmode.vercel.app'
 
 # Whether this run has the script on disk. `irm ... | iex` does not, so a hint
