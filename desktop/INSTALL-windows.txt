@@ -73,8 +73,10 @@ adds that folder to your user PATH - `setup -AddPath` runs it for you. After
 that:
 
   freebuff-focusmode status     report what is applied - changes nothing
-  freebuff-focusmode focus 25m  start a session
-  freebuff-focusmode unfocus    end it, and bring the ads back
+  freebuff-focusmode focus      keep the ads off until you end it
+  freebuff-focusmode focus 25m  keep them off until the deadline
+  freebuff-focusmode focus session  keep them off until Freebuff quits
+  freebuff-focusmode unfocus    end it now, and bring the ads back
   freebuff-focusmode update     fetch a newer tool, replace this copy, patch again
   freebuff-focusmode uninstall  remove the command; the patch stays
 
@@ -90,13 +92,31 @@ OTHER COMMANDS
   powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 revert    restore the untouched original
   powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 doctor    environment report, for a bug report
 
-A session is the patch plus an end time:
+FOCUS
+-----
 
-  powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 focus 25m   install and remember the duration
-  powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 unfocus      restore, and clear the session
+Three ways to ask, and only what ends them differs:
 
-There is no timer process. status reads the timestamp, and a session that runs
-out leaves the patch in place until you run unfocus.
+  freebuff-focusmode focus          quiet until you run unfocus
+  freebuff-focusmode focus 25m      quiet until the deadline
+  freebuff-focusmode focus session  quiet until Freebuff quits
+
+All three patch the app first. A plain `focus` writes no deadline: closing
+Freebuff and opening it again keeps the ads off, because the patched file is
+still on disk, and only `unfocus` restores it.
+
+`focus 25m` - or 90m, 2h, 45, 45s - starts one hidden PowerShell watcher that
+restores the original file when the deadline passes, so the next start of
+Freebuff is ads-on again. `focus session` starts the same watcher waiting on
+Freebuff itself: when the app exits, the original file goes back, so reopening it
+later shows ads.
+
+The watcher is the only thing this tool leaves running, and it writes nothing at
+all if the file changed since the patch. `unfocus` stops it, and so does a second
+`focus`. `status` says which mode is on and what will end it.
+
+The same commands work through the one-liner, because `irm | iex` takes a string
+and nothing else.
 
 The same commands work through the one-liner, because `iex` takes a string and
 nothing else:

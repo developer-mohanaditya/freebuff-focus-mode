@@ -40,7 +40,14 @@ const TOOL_SOURCE = fs.readFileSync(TOOL, 'utf8');
  * machine first and installs the copy it downloads, so the piped runs need a
  * version that compares as a real one.
  */
-const FIXTURE_VERSION = '1.8.0';
+const FIXTURE_VERSION = JSON.parse(
+  fs.readFileSync(path.join(ROOT, 'extension', 'manifest.json'), 'utf8')
+).version;
+/** The next patch release, served by the fake origin so `update` has something to do. */
+const NEXT_VERSION = (() => {
+  const [major, minor, patch] = FIXTURE_VERSION.split('.');
+  return `${major}.${minor}.${Number(patch) + 1}`;
+})();
 const STAMPED_SOURCE = TOOL_SOURCE.replaceAll('__FBD_VERSION__', FIXTURE_VERSION).replaceAll(
   '__FBD_ORIGIN__',
   'https://focus.test'
@@ -264,7 +271,7 @@ check('it reports already patched', /Already patched/.test(again.stdout));
 // Nothing to write means the run is worth only what it reports: the anchors in
 // place, the session, the process state, and the commands left to use.
 check('it lists the anchors already in place', /render\s+applied/.test(again.stdout) && /request\s+applied/.test(again.stdout));
-check('it says there is no session', /session\s+none/.test(again.stdout));
+check('it says there is no focus', /focus\s+none/.test(again.stdout));
 check('it prints the commands the tool has', ['status', 'focus 25m', 'unfocus', 'verify', 'scan', 'revert', 'doctor', 'help'].every((c) => again.stdout.includes(c)));
 check('a run from the file does not tell you to download it', /No local copy/.test(again.stdout), false);
 
@@ -733,7 +740,7 @@ check('setup again is not an error', runStamped(cmdInstall.app, cmdInstall.backu
 
 const viaCommand = runInstalled(cmdInstall, 'version');
 check('the installed copy runs', viaCommand.status, 0);
-check('and reports the tool version', /freebuff-focus-desktop 1\.8\.0/.test(viaCommand.stdout));
+check('and reports the tool version', viaCommand.stdout.includes(`freebuff-focus-desktop ${FIXTURE_VERSION}`));
 // -AddPath edits the user PATH, which is a Windows-only operation; on another
 // host the tool has to admit it could not and leave the rest usable.
 const added = runStamped(cmdInstall.app, cmdInstall.backups, 'setup', '-AddPath');
@@ -745,11 +752,11 @@ check(
 
 const freshInstall = makeInstall();
 runStamped(freshInstall.app, freshInstall.backups, 'setup');
-makeOrigin(freshInstall.root, '1.8.1');
+makeOrigin(freshInstall.root, NEXT_VERSION);
 const updated = runInstalled(freshInstall, 'update', '-App', freshInstall.app, '-BackupDir', freshInstall.backups);
 check('update exits 0', updated.status, 0);
-check('it names both versions', /1\.8\.0 -> 1\.8\.1/.test(updated.stdout));
-check('the installed copy is the new one', /\$Version = '1\.8\.1'/.test(read(path.join(freshInstall.home, 'freebuff-focus.ps1'))));
+check('it names both versions', updated.stdout.includes(`${FIXTURE_VERSION} -> ${NEXT_VERSION}`));
+check('the installed copy is the new one', read(path.join(freshInstall.home, 'freebuff-focus.ps1')).includes(`$Version = '${NEXT_VERSION}'`));
 check('the copy it replaced is kept', fs.existsSync(path.join(freshInstall.home, 'freebuff-focus.ps1.prev')));
 // The patch step is the new copy's, with the paths this run was given.
 check('and it patches with the new copy', count(read(freshInstall.target), '/*FBD-ADS-OFF:render*/'), 1);
@@ -763,7 +770,7 @@ makeOrigin(freshInstall.root, '1.7.9');
 const older = runInstalled(freshInstall, 'update');
 check('an older served copy is refused', older.status !== 0);
 check('and it says which way round they are', /older than the installed/.test(both(older)));
-check('and the installed copy is untouched', /\$Version = '1\.8\.1'/.test(read(path.join(freshInstall.home, 'freebuff-focus.ps1'))));
+check('and the installed copy is untouched', read(path.join(freshInstall.home, 'freebuff-focus.ps1')).includes(`$Version = '${NEXT_VERSION}'`));
 
 const removed = runInstalled(freshInstall, 'uninstall');
 check('uninstall exits 0', removed.status, 0);
@@ -820,29 +827,94 @@ if (!fs.existsSync(STAMPED)) {
 
 /* --------------------------------------------------------------- focus */
 
-console.log('\nfocus sessions');
+/*
+The three focus modes, and the watcher that ends two of them.
+
+`focus` on its own must promise nothing but `unfocus`. A timed focus leaves one
+hidden PowerShell watcher and restores the file when the deadline passes; a
+session focus leaves one waiting on the orchestrator process. The deadline half is
+checked end to end here - it starts the real watcher, with the real argument
+passing, and waits for the file to come back. The session half needs a process
+whose command line ends with orchestrator.js, which this suite cannot fabricate
+portably, so it is checked for the state it records and the message it prints.
+*/
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sessionKeys = (file) =>
+  Object.fromEntries(read(file).trim().split('\n').filter((l) => l.includes('=')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+
+console.log('\nfocus: until you end it');
 const focusTree = makeInstall();
 const sessionDir = path.join(focusTree.root, 'session-state');
-const focused = run(focusTree.app, focusTree.backups, 'focus', '1m', '-SessionDir', sessionDir);
-check('focus exits 0', focused.status, 0);
-check('it names the end of the session', /Focus until \d\d:\d\d/.test(focused.stdout));
-check('the patch went in', count(read(focusTree.target), '/*FBD-ADS-OFF:render*/'), 1);
-
 const sessionFile = path.join(sessionDir, 'session');
+const sessionLog = path.join(sessionDir, 'session.log');
+
+const focused = run(focusTree.app, focusTree.backups, 'focus', '-SessionDir', sessionDir);
+check('focus with no duration exits 0', focused.status, 0);
+check('it names no deadline', /Ads stay off until you end it/.test(focused.stdout));
+check('the patch went in', count(read(focusTree.target), '/*FBD-ADS-OFF:render*/'), 1);
 check('a session file is written', fs.existsSync(sessionFile));
-check('it carries an end time', /^endsAt=\d+$/m.test(read(sessionFile)));
+check('the mode is until-unfocus', sessionKeys(sessionFile).mode, 'until-unfocus');
+check('there is no end time', 'endsAt' in sessionKeys(sessionFile), false);
+check('and nothing is left running', fs.existsSync(sessionLog), false);
 
 const withSession = run(focusTree.app, focusTree.backups, 'status', '-SessionDir', sessionDir);
-check('status reports the session', /focus\s+on until \d\d:\d\d/.test(withSession.stdout));
+check('status says only unfocus ends it', /focus\s+on - until you run/.test(withSession.stdout));
 
 const unfocused = run(focusTree.app, focusTree.backups, 'unfocus', '-SessionDir', sessionDir);
 check('unfocus exits 0', unfocused.status, 0);
 check('it restores the original bytes', read(focusTree.target) === CURRENT);
 check('it clears the session file', fs.existsSync(sessionFile), false);
+check('and says so', /focus\s+cleared/.test(unfocused.stdout));
 
 const badDuration = run(focusTree.app, focusTree.backups, 'focus', 'soon', '-SessionDir', sessionDir);
 check('a duration that is not a duration is refused', badDuration.status !== 0);
 check('and it says what one looks like', /duration like 25m/.test(`${badDuration.stdout}${badDuration.stderr}`));
+check('and nothing is patched', read(focusTree.target) === CURRENT);
+
+console.log('\nfocus 5s: restored at the deadline');
+const timedTree = makeInstall();
+const timedDir = path.join(timedTree.root, 'session-state');
+const timedFile = path.join(timedDir, 'session');
+const timedLog = path.join(timedDir, 'session.log');
+run(timedTree.app, timedTree.backups, 'install', '-SessionDir', timedDir, '-NoWait');
+const timed = run(timedTree.app, timedTree.backups, 'focus', '5s', '-SessionDir', timedDir);
+check('a timed focus exits 0', timed.status, 0);
+check('it names the time it ends', /Focus until \d\d:\d\d/.test(timed.stdout));
+check('the mode is until', sessionKeys(timedFile).mode, 'until');
+check('it carries an end time', /^endsAt=\d+$/m.test(read(timedFile)));
+check('a watcher records its own pid', Number(sessionKeys(timedFile).watcher) > 0);
+check('and the file it wrote', /^\d+:\d+$/.test(sessionKeys(timedFile).stamp));
+
+await wait(7000);
+check('the deadline restores the original bytes', read(timedTree.target) === CURRENT);
+check('and the session file goes with it', fs.existsSync(timedFile), false);
+check('the log says why', /the deadline passed - restored/.test(read(timedLog)));
+
+console.log('\nfocus session: what it records');
+const sessTree = makeInstall();
+const sessDir = path.join(sessTree.root, 'session-state');
+const sessFile = path.join(sessDir, 'session');
+run(sessTree.app, sessTree.backups, 'install', '-SessionDir', sessDir, '-NoWait');
+const sess = run(sessTree.app, sessTree.backups, 'focus', 'session', '-SessionDir', sessDir);
+check('session focus exits 0', sess.status, 0);
+check('it says the ads come back when Freebuff quits', /Ads come back when you quit Freebuff/.test(sess.stdout));
+check('the mode is session', sessionKeys(sessFile).mode, 'session');
+check('it watches nothing yet, because no app is running', 'pid' in sessionKeys(sessFile), false);
+check('a watcher records its own pid', Number(sessionKeys(sessFile).watcher) > 0);
+const sessStatus = run(sessTree.app, sessTree.backups, 'status', '-SessionDir', sessDir);
+check('status says it is waiting for the app', /until Freebuff quits \(waiting for it to open\)/.test(sessStatus.stdout));
+
+// unfocus has to take the watcher with it, or the session outlives the command.
+const sessWatcher = Number(sessionKeys(sessFile).watcher);
+run(sessTree.app, sessTree.backups, 'unfocus', '-SessionDir', sessDir);
+await wait(800);
+const watcherAlive = (() => {
+  try { process.kill(sessWatcher, 0); return true; } catch { return false; }
+})();
+check('unfocus stops the watcher', watcherAlive, false);
+check('and clears the session file', fs.existsSync(sessFile), false);
+check('and restores the original bytes', read(sessTree.target) === CURRENT);
 
 const failed = results.filter((r) => !r).length;
 console.log('');

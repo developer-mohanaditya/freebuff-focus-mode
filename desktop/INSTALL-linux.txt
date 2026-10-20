@@ -59,18 +59,28 @@ It looks in ~/Applications, ~/Downloads, ~/.local/bin, ~/bin, ~/Desktop, /opt,
 /usr/local/bin and the current directory, for a file named *Freebuff*.AppImage.
 
 
-FOCUS SESSIONS
---------------
+FOCUS
+-----
 
-A session is the patch plus an end time:
+Three ways to ask, and only what ends them differs:
 
-  sh freebuff-focus-linux.sh focus 25m    install, and remember that you meant 25m
-  sh freebuff-focus-linux.sh status       shows "focus on until 14:20" while it lasts
-  sh freebuff-focus-linux.sh unfocus      restore the original, and clear the session
+  sh freebuff-focus-linux.sh focus          quiet until you run unfocus
+  sh freebuff-focus-linux.sh focus 25m      quiet until the deadline
+  sh freebuff-focus-linux.sh focus session  quiet until Freebuff quits
 
-25m is the default; 90m, 2h and a plain number of minutes all parse. There is no
-timer process: the timestamp is a file, status reads it, and a session that runs
-out leaves the patch where it is until you run unfocus.
+All three patch the copy first, so a failed install is a failed focus. A plain
+`focus` writes no deadline: closing Freebuff and opening it again keeps the ads
+off, because the patched file is still on disk, and only `unfocus` restores it.
+
+`focus 25m` - or 90m, 2h, 45, 45s - starts one small watcher, a detached `sh`,
+that restores the original file when the deadline passes, so the next start of
+the patched copy is ads-on again. `focus session` starts the same watcher waiting
+on Freebuff itself: when that process exits, the original file goes back.
+
+The watcher is the only thing this tool leaves running, and it writes nothing at
+all if the file changed since the patch - a new AppImage or a fresh install makes
+it stand down rather than overwrite. `unfocus` stops it, and so does a second
+`focus`. `status` says which mode is on and what will end it.
 
 
 AFTER YOU RUN IT
@@ -106,8 +116,10 @@ folder to your PATH if it is not there already. `setup --add-path` edits your
 shell rc instead of telling you to. After that:
 
   freebuff-focusmode status     report what is applied - changes nothing
-  freebuff-focusmode focus 25m  start a session
-  freebuff-focusmode unfocus    end it, and bring the ads back
+  freebuff-focusmode focus      keep the ads off until you end it
+  freebuff-focusmode focus 25m  keep them off until the deadline
+  freebuff-focusmode focus session  keep them off until Freebuff quits
+  freebuff-focusmode unfocus    end it now, and bring the ads back
   freebuff-focusmode update     fetch a newer tool, replace this copy, patch again
   freebuff-focusmode uninstall  remove the command; the patch stays
 

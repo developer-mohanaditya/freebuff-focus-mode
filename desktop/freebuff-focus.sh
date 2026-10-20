@@ -30,6 +30,9 @@
 #   sh freebuff-focus.sh            # install (the default)
 #   sh freebuff-focus.sh status     # report what is applied, change nothing
 #   sh freebuff-focus.sh install    # patch, backing up first
+#   sh freebuff-focus.sh focus      # quiet until you run unfocus
+#   sh freebuff-focus.sh focus 25m  # quiet until the deadline, then restored
+#   sh freebuff-focus.sh focus session  # quiet until Freebuff quits
 #   sh freebuff-focus.sh verify     # wait for the relaunch, check what it loaded
 #   sh freebuff-focus.sh revert     # restore the pristine backup
 #   sh freebuff-focus.sh doctor     # environment report for a bug report
@@ -91,6 +94,17 @@ RESIGN=0
 # never  - never touch a process (--no-restart)
 RESTART=auto
 FOCUS_ARG=""
+# The watcher `focus 25m` and `focus session` start. The arguments below are only
+# set by `__watch`, which is how the tool re-invokes itself - it is not a command
+# anyone types, and it is deliberately absent from the command list and the help.
+INTERVAL=1
+WATCH_RUN=""
+WATCH_TARGET=""
+WATCH_BACKUP=""
+WATCH_STAMP=""
+WATCH_MODE=""
+WATCH_PID=""
+WATCH_ENDS=""
 # Waiting is the point of `verify`, and it is only ever done when Freebuff is
 # open - a closed app has no relaunch to observe, and an unattended install must
 # not sit here. The wait is bounded anyway, and Ctrl-C stops it.
@@ -131,6 +145,21 @@ while [ $# -gt 0 ]; do
   case "$1" in
     install|status|verify|revert|doctor|scan|focus|unfocus|help|version) COMMAND="$1"; shift ;;
     setup|update|uninstall) COMMAND="$1"; shift ;;
+    __watch) COMMAND="__watch"; shift ;;
+    --interval|--watch-run|--watch-target|--watch-backup|--watch-stamp|--watch-mode|--watch-pid|--watch-ends)
+      key="${1#--}"; shift
+      [ $# -gt 0 ] || die "--$key needs a value"
+      case "$key" in
+        interval)     INTERVAL="$1" ;;
+        watch-run)    WATCH_RUN="$1" ;;
+        watch-target) WATCH_TARGET="$1" ;;
+        watch-backup) WATCH_BACKUP="$1" ;;
+        watch-stamp)  WATCH_STAMP="$1" ;;
+        watch-mode)   WATCH_MODE="$1" ;;
+        watch-pid)    WATCH_PID="$1" ;;
+        watch-ends)   WATCH_ENDS="$1" ;;
+      esac
+      shift ;;
     --app=*) APP="${1#--app=}"; shift ;;
     --backup-dir=*) BACKUP_DIR="${1#--backup-dir=}"; shift ;;
     --session-dir=*) SESSION_DIR="${1#--session-dir=}"; shift ;;
@@ -162,6 +191,10 @@ done
 case "$WAIT_SECS" in
   ''|*[!0-9]*) die "--timeout needs a number of seconds, not '$WAIT_SECS'" ;;
 esac
+case "$INTERVAL" in
+  ''|*[!0-9]*) die "--interval needs a number of seconds, not '$INTERVAL'" ;;
+esac
+[ "$INTERVAL" -ge 1 ] || INTERVAL=1
 
 [ -n "$COMMAND" ] || COMMAND=install
 
@@ -293,27 +326,45 @@ stale_process() {
 
 # ------------------------------------------------------------- focus sessions
 #
-# A session is a timestamp in a file, nothing more. No timer process, no daemon,
-# no network: `status` reads it, `install` ignores it, and the ads coming back is
-# `unfocus`. That is the whole mechanism, and it is deliberately the whole
-# mechanism - a background job that could revert a patch is a background job that
-# could revert one at the wrong time.
+# A focus is one small file, and its three modes differ only in what ends it:
+#
+#   focus           mode=until-unfocus  nothing does. `unfocus` puts the pristine
+#                                       file back when the reader asks it to.
+#   focus 25m       mode=until          a deadline. A watcher restores the file
+#                                       when it passes, so the next launch of
+#                                       Freebuff has ads again.
+#   focus session   mode=session        the app. The watcher restores the file as
+#                                       the orchestrator it watches exits, so
+#                                       reopening Freebuff later shows ads.
+#
+# "The ads come back when this run of the app ends" cannot be a timestamp: the
+# orchestrator is read once at launch, so something has to put the pristine file
+# back. That is the watcher - one detached `sh` per timed or session focus,
+# polling, and gone the moment what it waits for happens. `unfocus` stops it, a
+# session file that no longer carries its run token makes it stand down, and it
+# writes nothing at all if the file changed after the patch (a Freebuff update, a
+# fresh install), so it can never clobber a patch someone else made. Plain
+# `focus` is the only mode that leaves nothing running.
 
+# Seconds, or nothing. There is no default any more: `focus` with no argument
+# means "until unfocus", so guessing a duration here would contradict the reader.
+# 25m, 90m, 2h, 45 (minutes) and 45s all parse; anything else is refused.
 duration_seconds() {
-  raw="${1:-25m}"
+  raw="${1:-}"
+  [ -n "$raw" ] || return 1
+  unit=60
   case "$raw" in
+    *s) n="${raw%s}"; unit=1 ;;
     *m) n="${raw%m}" ;;
-    *h)
-      n="${raw%h}"
-      case "$n" in ''|*[!0-9]*) return 1 ;; esac
-      n=$(( n * 60 )) ;;
+    *h) n="${raw%h}"; unit=3600 ;;
     *[!0-9]*) return 1 ;;
-    *) n="$raw" ;;
+    *)  n="$raw" ;;
   esac
   case "$n" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$n" -gt 0 ] || return 1
-  [ "$n" -le 1440 ] || return 1
-  printf '%s' "$(( n * 60 ))"
+  secs=$(( n * unit ))
+  [ "$secs" -ge 5 ] || return 1
+  [ "$secs" -le 86400 ] || return 1
+  printf '%s' "$secs"
 }
 
 clock_at() {
@@ -324,22 +375,241 @@ clock_at() {
   fi
 }
 
-session_ends() {
-  [ -f "$SESSION_DIR/session" ] || return 1
-  sed -n 's/^endsAt=//p' "$SESSION_DIR/session" 2>/dev/null | head -n 1
+session_file() {
+  printf '%s/session' "$SESSION_DIR"
 }
 
-# One line in status: whether a focus session is on, and when it lifts. Silent
-# when there is no session at all, because most runs have nothing to say.
-session_line() {
-  ends="$(session_ends)" || return 0
-  case "$ends" in ''|*[!0-9]*) return 0 ;; esac
-  now="$(date +%s)"
-  if [ "$now" -lt "$ends" ]; then
-    say "  focus    on until $(clock_at "$ends") ($(( (ends - now + 59) / 60 )) min left)"
-  else
-    say "  focus    session ended at $(clock_at "$ends") - run: $(cmdname) unfocus"
+# One key out of the session file. Fails when there is no file at all, so a
+# caller can tell "no session" apart from "a session with an empty value".
+session_get() {
+  file="$(session_file)"
+  [ -f "$file" ] || return 1
+  sed -n "s/^$1=//p" "$file" 2>/dev/null | head -n 1
+}
+
+# Replace one key, adding it when it is not there yet. With a third argument the
+# write only happens while the file still belongs to that run: a watcher may
+# record its own pid, but it may never edit a session that has been replaced.
+session_set() {
+  key="$1"; val="$2"; token="${3:-}"
+  file="$(session_file)"
+  [ -f "$file" ] || return 1
+  if [ -n "$token" ] && [ "$(session_get run || true)" != "$token" ]; then return 1; fi
+  tmp="$file.tmp.$$"
+  awk -v k="$key" -v v="$val" '
+    BEGIN { done = 0 }
+    $0 ~ ("^" k "=") { print k "=" v; done = 1; next }
+    { print }
+    END { if (!done) print k "=" v }
+  ' "$file" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$file"
+}
+
+# Which of the three a session is. A 1.8.0 file has an end time and no mode, and
+# it meant the same thing a timed focus means now.
+session_mode() {
+  mode="$(session_get mode || true)"
+  if [ -z "$mode" ]; then
+    if [ -n "$(session_ends || true)" ]; then mode=until; else mode=until-unfocus; fi
   fi
+  printf '%s' "$mode"
+}
+
+session_ends() {
+  [ -f "$(session_file)" ] || return 1
+  sed -n 's/^endsAt=//p' "$(session_file)" 2>/dev/null | head -n 1
+}
+
+# Whether the process that is supposed to end this focus is still there.
+watch_alive() {
+  wpid="$(session_get watcher || true)"
+  case "$wpid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$wpid" 2>/dev/null
+}
+
+# One line in status: what kind of focus is on, and what will end it. Silent when
+# there is no session file at all, because most runs have nothing to say.
+session_line() {
+  [ -f "$(session_file)" ] || return 0
+  case "$(session_mode)" in
+    until-unfocus)
+      say "  focus    on - until you run: $(cmdname) unfocus"
+      ;;
+    session)
+      pid="$(session_get pid || true)"
+      if [ -z "$pid" ]; then
+        say "  focus    on - until Freebuff quits (waiting for it to open)"
+      elif kill -0 "$pid" 2>/dev/null; then
+        say "  focus    on - until Freebuff quits (pid $pid)"
+      else
+        say "  focus    ended with Freebuff - ads are back on the next launch"
+        say "           run: $(cmdname) unfocus   (to restore it now)"
+      fi
+      ;;
+    *)
+      ends="$(session_ends || true)"
+      case "$ends" in
+        ''|*[!0-9]*) say "  focus    on - until you run: $(cmdname) unfocus" ; return 0 ;;
+      esac
+      now="$(date +%s)"
+      if [ "$now" -lt "$ends" ]; then
+        say "  focus    on until $(clock_at "$ends") ($(( (ends - now + 59) / 60 )) min left)"
+      else
+        say "  focus    deadline passed at $(clock_at "$ends") - ads are back on the next launch"
+        say "           run: $(cmdname) unfocus   (to restore it now)"
+      fi
+      ;;
+  esac
+}
+
+# The copy of this tool a detached watcher can execute: the file on disk, or the
+# installed one when this run came through curl and has no file behind it.
+self_path() {
+  if [ "$HAVE_LOCAL" = "1" ] && [ -f "${0:-}" ]; then printf '%s' "$0"; return 0; fi
+  [ -f "$INSTALLED_SELF" ] && { printf '%s' "$INSTALLED_SELF"; return 0; }
+  return 1
+}
+
+# What the file looked like when the patch was written: its length and its mtime.
+# The watcher writes only while the file still matches, so an update or a fresh
+# install between the patch and the deadline makes it stand down rather than
+# overwrite whatever is there now.
+file_stamp() {
+  size="$(wc -c < "$1" 2>/dev/null | tr -d ' ')" || return 1
+  [ -n "$size" ] || return 1
+  printf '%s:%s' "$size" "$(file_mtime "$1" || printf '0')"
+}
+
+# The newest process running this orchestrator, if any. The same suffix test
+# `orchestrator_pids` uses, against the file rather than the bundle, so the
+# watcher works out of any app location `--app` was given.
+newest_pid_for() {
+  want="$1"; best=""; best_start=""
+  command -v pgrep >/dev/null 2>&1 || return 0
+  for cand in $(pgrep -f "$want" 2>/dev/null); do
+    cmd="$(ps -p "$cand" -o command= 2>/dev/null | sed 's/[[:space:]]*$//')"
+    case "$cmd" in *"$want") ;; *) continue ;; esac
+    s="$(proc_start_epoch "$cand")" || continue
+    if [ -z "$best_start" ] || [ "$s" -gt "$best_start" ]; then best="$cand"; best_start="$s"; fi
+  done
+  [ -n "$best" ] && printf '%s' "$best"
+}
+
+# Ask a running watcher to stop and give it a moment to be gone. `unfocus` and a
+# second `focus` both call this: two watchers on one session would race to restore
+# the same file. The pid is looked up two ways because the watcher records its own
+# - there is a moment right after `focus` returns in which the file does not carry
+# it yet, and a second `focus` in that moment must not leave the first one alive.
+stop_watcher() {
+  victims=""
+  wpid="$(session_get watcher || true)"
+  case "$wpid" in
+    ''|*[!0-9]*) ;;
+    *) kill -0 "$wpid" 2>/dev/null && victims="$wpid" ;;
+  esac
+  token="$(session_get run || true)"
+  if [ -n "$token" ] && command -v pgrep >/dev/null 2>&1; then
+    for cand in $(pgrep -f "watch-run $token" 2>/dev/null); do
+      [ "$cand" = "$$" ] && continue
+      case " $victims " in *" $cand "*) ;; *) victims="$victims $cand" ;; esac
+    done
+  fi
+  [ -n "$victims" ] || return 0
+  for cand in $victims; do kill "$cand" 2>/dev/null || true; done
+  waited=0
+  while [ "$waited" -lt 3 ]; do
+    alive=""
+    for cand in $victims; do kill -0 "$cand" 2>/dev/null && alive=1; done
+    [ -z "$alive" ] && break
+    sleep 1 2>/dev/null || true
+    waited=$(( waited + 1 ))
+  done
+  return 0
+}
+
+# One detached process per timed or session focus. `setsid` where it exists, so a
+# closed terminal cannot take it down; `nohup` where it does not (macOS ships no
+# setsid). The watcher records its own pid - `$!` may name the setsid wrapper,
+# which can be gone by the time anything looks.
+start_watcher() {
+  self="$(self_path)" || return 1
+  log="$(session_file).log"
+  set -- __watch \
+    --app "${app:-}" \
+    --backup-dir "$BACKUP_DIR" \
+    --session-dir "$SESSION_DIR" \
+    --watch-run "$RUN" \
+    --watch-target "$TARGET" \
+    --watch-backup "$BACKUP" \
+    --watch-stamp "$STAMP" \
+    --watch-mode "$MODE" \
+    --watch-pid "$PID" \
+    --watch-ends "$ENDS" \
+    --interval "$INTERVAL"
+  if command -v setsid >/dev/null 2>&1; then
+    setsid sh "$self" "$@" >>"$log" 2>&1 </dev/null &
+  else
+    nohup sh "$self" "$@" >>"$log" 2>&1 </dev/null &
+  fi
+  return 0
+}
+
+# The watcher. Started by `focus`, never typed: it waits for the one thing that
+# ends this focus, puts the pristine file back, and leaves. It logs to
+# session.log beside the session file, one line per decision.
+cmd_watch() {
+  [ -n "$WATCH_RUN" ] || exit 0
+  [ -n "$WATCH_TARGET" ] && [ -f "$WATCH_TARGET" ] || exit 0
+  log="$(session_file).log"
+  watch_log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$log"; }
+
+  # Own the session. A watcher whose session was already replaced exits here
+  # rather than watching for a run nobody is waiting on.
+  session_set watcher "$$" "$WATCH_RUN" || exit 0
+  watch_log "watching $WATCH_MODE${WATCH_PID:+ pid $WATCH_PID} - $WATCH_TARGET"
+
+  while :; do
+    if [ "$(session_get run || true)" != "$WATCH_RUN" ]; then
+      watch_log 'standing down: the session was cleared or replaced'
+      exit 0
+    fi
+
+    if [ "$WATCH_MODE" = "session" ]; then
+      if [ -z "$WATCH_PID" ]; then
+        WATCH_PID="$(newest_pid_for "$WATCH_TARGET")"
+        if [ -n "$WATCH_PID" ]; then
+          session_set pid "$WATCH_PID" "$WATCH_RUN" || true
+          watch_log "Freebuff opened, pid $WATCH_PID"
+        fi
+      elif ! kill -0 "$WATCH_PID" 2>/dev/null; then
+        finish_watch 'Freebuff quit'; exit 0
+      fi
+    else
+      case "$WATCH_ENDS" in
+        ''|*[!0-9]*) : ;;
+        *) if [ "$(date +%s)" -ge "$WATCH_ENDS" ]; then finish_watch 'the deadline passed'; exit 0; fi ;;
+      esac
+    fi
+
+    sleep "$INTERVAL"
+  done
+}
+
+# Put the pristine file back, but only if it is still the file the patch wrote.
+# Anything else means someone has already changed it, and silence is the only
+# honest answer to that.
+finish_watch() {
+  reason="$1"
+  log="$(session_file).log"
+  now="$(date '+%Y-%m-%d %H:%M:%S')"
+  if [ "$(file_stamp "$WATCH_TARGET" || true)" != "$WATCH_STAMP" ]; then
+    printf '%s %s - left the file alone: it changed after the patch\n' "$now" "$reason" >>"$log"
+  elif cp "$WATCH_BACKUP" "$WATCH_TARGET" 2>/dev/null; then
+    printf '%s %s - restored %s\n' "$now" "$reason" "$WATCH_TARGET" >>"$log"
+  else
+    printf '%s %s - could not restore %s (run: unfocus)\n' "$now" "$reason" "$WATCH_TARGET" >>"$log"
+  fi
+  if [ "$(session_get run || true)" = "$WATCH_RUN" ]; then rm -f "$(session_file)"; fi
 }
 
 # When that process started, as an epoch second. Elapsed time is the only thing
@@ -798,9 +1068,11 @@ all_applied() {
 # report and `help` stays the long form.
 next_steps() {
   say "  ${B}What this tool can do${OFF}"
-  say "  status        what is applied, and any session - changes nothing"
-  say "  focus 25m     start a session: 25m, 90m, 2h, or plain minutes"
-  say "  unfocus       end the session and bring the ads back"
+  say "  status        what is applied, and any focus - changes nothing"
+  say "  focus         quiet until you run unfocus"
+  say "  focus 25m     quiet until a deadline: 25m, 90m, 2h, 45s"
+  say "  focus session quiet until Freebuff quits"
+  say "  unfocus       end it now and bring the ads back"
   say "  verify        wait for a relaunch, then check what it loaded"
   say "  scan          every anchor this build contains - read-only"
   say "  revert        restore the pristine backup"
@@ -859,9 +1131,11 @@ cmd_help() {
   say ""
   say "${B}commands${OFF}"
   say "  install   patch the app (default; backs up first, then restarts it)"
-  say "  focus     install, then keep a session for a while (default 25m)"
-  say "  unfocus   end the session: restore the pristine backup"
-  say "  status    report what is applied, and any session - changes nothing"
+  say "  focus     quiet until you run unfocus (no timer, no watcher)"
+  say "  focus 25m quiet until a deadline: 25m, 90m, 2h, 45s"
+  say "  focus session  quiet until Freebuff quits"
+  say "  unfocus   end it now: restore the pristine backup"
+  say "  status    report what is applied, and any focus - changes nothing"
   say "  verify    wait for Freebuff to be relaunched, then check what it loaded"
   say "  scan      show every anchor this build has - changes nothing"
   say "  revert    restore the pristine backup"
@@ -885,10 +1159,20 @@ cmd_help() {
   say "  --add-path         setup: append ${BIN_DIR} to your shell rc"
   say "  --force            update: reinstall even when the version matches"
   say ""
-  say "A focus session is a timestamp on disk, not a process. It is 25m, 90m, 2h"
-  say "or a plain number of minutes, and it does nothing on its own: ${B}unfocus${OFF}"
-  say "restores the ads, and a session that runs out leaves the patch in place"
-  say "until you do."
+  say "A focus has three modes, and only what ends it differs:"
+  say "  focus          nothing but ${B}unfocus${OFF}. Closing and reopening Freebuff"
+  say "                 keeps the ads off - the patched file is still on disk."
+  say "  focus 25m      a deadline. A watcher restores the original file when it"
+  say "                 passes, so the next start of Freebuff has ads again. A"
+  say "                 window that is already open keeps the code it started with"
+  say "                 until it restarts - nothing here restarts it for you."
+  say "  focus session  quitting Freebuff. The watcher restores the file as the"
+  say "                 app exits, so reopening it later shows ads."
+  say ""
+  say "The watcher is one small ${B}sh${OFF} process per timed or session focus - the"
+  say "only thing this tool leaves running. It writes only while the file is still"
+  say "the one the patch wrote, so a Freebuff update in the meantime makes it stand"
+  say "down instead of overwriting. ${B}unfocus${OFF} stops it."
   say ""
   say "A patch on disk is not the same as a patch in effect: the orchestrator is"
   say "read once at launch. ${B}verify${OFF} waits for the relaunch and reports the"
@@ -994,8 +1278,8 @@ cmd_install() {
     say "  ${GREEN}Already patched.${OFF} Every anchor in this build is already replaced."
     render_report "$report"
     session_line
-    if [ -z "$(session_ends)" ]; then
-      say "  session  none - ads stay off until you revert"
+    if [ ! -f "$(session_file)" ]; then
+      say "  focus    none - ads stay off until you revert"
     fi
     say ""
 
@@ -1091,6 +1375,16 @@ cmd_install() {
 
   ok "patched Freebuff $version"
   hr
+
+  # A fresh write means any recorded session describes the old bytes. The watcher
+  # that was waiting on them has to go before it restores the wrong thing, and a
+  # session nobody is watching is worse than no session at all.
+  if [ -f "$(session_file)" ] && [ "$(session_get stamp || true)" != "$(file_stamp "$target" || true)" ]; then
+    stop_watcher
+    rm -f "$(session_file)" 2>/dev/null || true
+    say "  focus    cleared - the patch was rewritten"
+    say ""
+  fi
 
   running="$(orchestrator_pids "$app")"
   if [ "$RESTART" = "never" ]; then
@@ -1309,6 +1603,8 @@ cmd_uninstall() {
 }
 
 cmd_revert() {
+  # Nothing may be waiting to write this file once it is being restored.
+  stop_watcher
   app="$(find_app)" || die "Freebuff Desktop was not found. Pass --app /path/to/Freebuff.app"
   target="$app/Contents/Resources/orchestrator/orchestrator.js"
   version="$(app_version "$app")"
@@ -1555,38 +1851,105 @@ verify_running() {
 
 # ------------------------------------------------------------------------ run
 
-# install, and then record a session. The patch is the thing that hides ads; the
-# session only says how long the reader meant it to last, so a failed install is
-# a failed focus and nothing is written.
+# Which of the three modes this run asked for. `focus session` is the only
+# spelling that is not a duration, so it is checked first and by name.
+focus_mode() {
+  case "${FOCUS_ARG:-}" in
+    '')          printf 'until-unfocus' ;;
+    session|SESSION|Session) printf 'session' ;;
+    *)           printf 'until' ;;
+  esac
+}
+
+# install, then record what should end it. The patch is the thing that hides ads;
+# the session file only says what will put it back, so a failed install is a
+# failed focus and nothing is recorded.
 cmd_focus() {
-  secs="$(duration_seconds "$FOCUS_ARG")" || die "focus needs a duration like 25m, 90m, 2h or 45 (minutes)"
+  MODE="$(focus_mode)"
+  SECS=""
+  if [ "$MODE" = "until" ]; then
+    SECS="$(duration_seconds "$FOCUS_ARG")" \
+      || die "focus takes a duration like 25m, 90m, 2h or 45s, or the word session"
+  fi
+
+  # A second focus replaces the first: one session file, one watcher.
+  stop_watcher
+
+  # The watcher re-runs this tool, so a piped run has to leave a copy behind.
+  [ "$HAVE_LOCAL" = "1" ] || [ -f "$INSTALLED_SELF" ] || cmd_setup || return 1
 
   cmd_install || return 1
 
   mkdir -p "$SESSION_DIR" 2>/dev/null || die "cannot create $SESSION_DIR"
-  ends=$(( $(date +%s) + secs ))
-  if ! printf 'endsAt=%s\nduration=%sm\n' "$ends" "$(( secs / 60 ))" > "$SESSION_DIR/session" 2>/dev/null; then
-    die "cannot write $SESSION_DIR/session"
-  fi
+  now="$(date +%s)"
+  RUN="$$-$now"
+  TARGET="$target"
+  BACKUP="$BACKUP_DIR/orchestrator.js.$version.orig"
+  STAMP="$(file_stamp "$target")" || STAMP=""
+  ENDS=""
+  PID=""
+  case "$MODE" in
+    until)   ENDS=$(( now + SECS )) ;;
+    session) PID="$(newest_pid_for "$target")" ;;
+  esac
+
+  file="$(session_file)"
+  {
+    printf 'mode=%s\n' "$MODE"
+    printf 'run=%s\n' "$RUN"
+    printf 'started=%s\n' "$now"
+    printf 'target=%s\n' "$TARGET"
+    printf 'backup=%s\n' "$BACKUP"
+    printf 'stamp=%s\n' "$STAMP"
+    if [ -n "$ENDS" ]; then printf 'endsAt=%s\nduration=%ss\n' "$ENDS" "$SECS"; fi
+    if [ -n "$PID" ]; then printf 'pid=%s\n' "$PID"; fi
+  } > "$file" 2>/dev/null || die "cannot write $file"
+
+  case "$MODE" in
+    until-unfocus) ;;
+    *) start_watcher || warn "could not start the watcher - see $SESSION_DIR"; ;;
+  esac
 
   say ""
-  say "${B}Focus until $(clock_at "$ends").${OFF} Ads come back when you end it:"
-  say "    $(cmdname) unfocus"
-  say "There is no timer process. A session that runs out leaves the patch where"
-  say "it is until you run that, which is stated here rather than pretended away."
+  case "$MODE" in
+    until-unfocus)
+      say "${B}Focus is on.${OFF} Ads stay off until you end it:"
+      say "    $(cmdname) unfocus"
+      say "Nothing else ends this one - closing Freebuff and opening it again"
+      say "keeps the quiet, because the patched file is still on disk."
+      ;;
+    session)
+      say "${B}Focus for this session.${OFF} Ads come back when you quit Freebuff:"
+      say "    $(cmdname) unfocus     (end it now, without quitting)"
+      if [ -n "$PID" ]; then
+        say "Watching pid $PID. Quit Freebuff and open it again: the next launch"
+        say "reads the original file, so the ads are back with nothing to type."
+      else
+        say "Freebuff is not open. The watcher starts when it is, and restoring"
+        say "the file when it quits."
+      fi
+      ;;
+    *)
+      say "${B}Focus until $(clock_at "$ENDS").${OFF} After that the ads come back on"
+      say "their own - the original file is restored at the deadline:"
+      say "    $(cmdname) unfocus     (end it now)"
+      say "A window that is open at the deadline keeps the code it started with,"
+      say "so it stays quiet until it restarts."
+      ;;
+  esac
 }
 
-# End the session and put the original file back. The session file goes even
-# when there was nothing to restore, so a stale timestamp cannot outlive the
-# patch it describes.
+# End the focus now and put the original file back. The session file goes even
+# when there was nothing to restore, so a stale session cannot outlive the patch
+# it describes - and the revert runs in a subshell, so its exit cannot skip the
+# cleanup.
 cmd_unfocus() {
+  stop_watcher
   status=0
-  cmd_revert || status=$?
-  if [ -d "$SESSION_DIR" ]; then
-    rm -f "$SESSION_DIR/session" 2>/dev/null || true
-  fi
+  ( cmd_revert ) || status=$?
+  rm -f "$(session_file)" 2>/dev/null || true
   [ "$status" -eq 0 ] || return "$status"
-  say "  session  cleared"
+  say "  focus    cleared"
   return 0
 }
 
@@ -1598,6 +1961,7 @@ case "$COMMAND" in
     cmd_install ;;
   focus)   cmd_focus ;;
   unfocus) cmd_unfocus ;;
+  __watch) cmd_watch ;;
   status)  cmd_status ;;
   verify)  cmd_verify ;;
   revert)  cmd_revert ;;
