@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { CURRENT, GATE, RENAMED, TWO_GATES, DECOY } from './desktop-fixtures.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const TOOL = path.join(ROOT, 'desktop', 'freebuff-adblock.ps1');
+const TOOL = path.join(ROOT, 'desktop', 'freebuff-focus.ps1');
 const TOOL_SOURCE = fs.readFileSync(TOOL, 'utf8');
 
 /* ---------------------------------------------------------------------- pwsh */
@@ -156,7 +156,7 @@ check('status changes nothing', read(a.target) === CURRENT);
 console.log('\nhelp and version');
 check('help exits 0', run(a.app, a.backups, 'help').status, 0);
 check('the help text documents verify', /verify\s+wait for Freebuff/.test(run(a.app, a.backups, 'help').stdout));
-check('version prints the tool version', /^freebuff-adblock-desktop \S+$/m.test(run(a.app, a.backups, 'version').stdout));
+check('version prints the tool version', /^freebuff-focus-desktop \S+$/m.test(run(a.app, a.backups, 'version').stdout));
 
 /* ------------------------------------------------------------------ install */
 
@@ -223,8 +223,8 @@ const twoGates = run(c.app, c.backups, 'install');
 check('install refuses', twoGates.status !== 0);
 check('the render anchor reads as ambiguous', /render\s+ambiguous/.test(twoGates.stdout));
 check('it says why, with the counts', /match\(es\)/.test(twoGates.stdout) && /trusted as written/.test(twoGates.stdout));
-check('it points at the local scan', /freebuff-adblock\.ps1 scan/.test(twoGates.stdout));
-check('and at the piped scan', /freebuff-adblock-desktop\.ps1/.test(twoGates.stdout));
+check('it points at the local scan', /freebuff-focus\.ps1 scan/.test(twoGates.stdout));
+check('and at the piped scan', /freebuff-focus-desktop\.ps1/.test(twoGates.stdout));
 check('the file is left untouched', read(c.target) === TWO_GATES);
 check('no backup was taken', fs.existsSync(c.backups), false);
 
@@ -396,7 +396,7 @@ check(
 const pipedUnknown = makeInstall('export const renamed = 1; // nothing the tool knows\n');
 const pipedRefusal = runPiped(pipedUnknown.app, pipedUnknown.backups, 'install');
 check('a piped refusal exits non-zero', pipedRefusal.status !== 0);
-check('and offers the piped scan by URL', /freebuff-adblock-desktop\.ps1/.test(pipedRefusal.stdout));
+check('and offers the piped scan by URL', /freebuff-focus-desktop\.ps1/.test(pipedRefusal.stdout));
 check('and wrote nothing', read(pipedUnknown.target), 'export const renamed = 1; // nothing the tool knows\n');
 
 /* ------------------------------------------------------------------- verify */
@@ -424,7 +424,7 @@ const idle = run(v.app, v.backups, 'verify', '-NoWait');
 check('verify exits non-zero with Freebuff closed', idle.status !== 0);
 check('it reports both anchors applied', /render\s+applied/.test(idle.stdout) && /request\s+applied/.test(idle.stdout));
 check('it says Freebuff is not open', /Freebuff is not open/.test(idle.stdout));
-check('it points at running verify again', /freebuff-adblock\.ps1 verify/.test(idle.stdout));
+check('it points at running verify again', /freebuff-focus\.ps1 verify/.test(idle.stdout));
 check('verify changes nothing in the bundle', read(v.target) === patchedBytes);
 
 const noTimeout = run(v.app, v.backups, 'verify', '-NoWait', '-Timeout', 'soon');
@@ -467,7 +467,9 @@ console.log('\nverify, with an app that was already running');
 const stale = makeInstall();
 const already = standIn(stale.app);
 await new Promise((resolve) => setTimeout(resolve, 500));
-run(stale.app, stale.backups, 'install', '-NoWait');
+// -NoRestart is what pins this scenario: with the 1.7 default, install would
+// restart the app it found, and there would be no stale process left to refuse.
+run(stale.app, stale.backups, 'install', '-NoWait', '-NoRestart');
 stampPatchTime(stale.target, 60);
 const notYet = run(stale.app, stale.backups, 'verify', '-NoWait');
 retire(already);
@@ -577,13 +579,13 @@ console.log('\nwhat install says afterwards');
 const closedTail = makeInstall();
 const closedRun = run(closedTail.app, closedTail.backups, 'install');
 check('the closed-app heading is on its own line', /Open Freebuff\.\r?\nThe patch takes effect on the next launch/.test(closedRun.stdout));
-check('and it points at verify', /freebuff-adblock\.ps1 verify/.test(closedRun.stdout));
-check('and at revert', /freebuff-adblock\.ps1 revert/.test(closedRun.stdout));
+check('and it points at verify', /freebuff-focus\.ps1 verify/.test(closedRun.stdout));
+check('and at revert', /freebuff-focus\.ps1 revert/.test(closedRun.stdout));
 
 const openTail = makeInstall();
 const openProcess = standIn(openTail.app);
 await new Promise((resolve) => setTimeout(resolve, 400));
-const openRun = run(openTail.app, openTail.backups, 'install', '-NoWait');
+const openRun = run(openTail.app, openTail.backups, 'install', '-NoWait', '-NoRestart');
 retire(openProcess);
 
 check(
@@ -592,6 +594,21 @@ check(
 );
 check('a no-wait install does not sit on the relaunch', /Then check what it loaded/.test(openRun.stdout));
 check('and the patch still went in', count(read(openTail.target), '/*FBD-ADS-OFF:request*/'), 1);
+
+// The 1.7 default, on a host with no Freebuff.exe to start: it must still say
+// that it is restarting, and must say so plainly when it cannot.
+const restartTail = makeInstall();
+const restartProcess = standIn(restartTail.app);
+await new Promise((resolve) => setTimeout(resolve, 400));
+const restartRun = run(restartTail.app, restartTail.backups, 'install', '-NoWait');
+retire(restartProcess);
+
+check('an open app is restarted by default', /Restarting Freebuff so the patch takes effect/.test(restartRun.stdout));
+check(
+  'and a restart it cannot do is admitted, not claimed',
+  /restarted Freebuff/.test(restartRun.stdout) || /could not restart Freebuff/.test(restartRun.stdout)
+);
+check('and the patch still went in', count(read(restartTail.target), '/*FBD-ADS-OFF:request*/'), 1);
 
 /* --------------------------------------------------------------- a big bundle */
 
@@ -622,7 +639,7 @@ check(`the install finishes in reasonable time (${bigElapsed} ms)`, bigElapsed <
  * `npm run build`, so a missing or stale one is a build away.
  */
 console.log('\nthe stamped artifact in site/downloads');
-const STAMPED = path.join(ROOT, 'site', 'downloads', 'freebuff-adblock-desktop.ps1');
+const STAMPED = path.join(ROOT, 'site', 'downloads', 'freebuff-focus-desktop.ps1');
 
 if (!fs.existsSync(STAMPED)) {
   console.log('  (not built yet - skipping; run npm run build)');
@@ -654,10 +671,36 @@ if (!fs.existsSync(STAMPED)) {
   check('and prints the counts it saw', /match\(es\)/.test(shippedRefusal.stdout));
   check(
     'and a scan command naming the real origin',
-    /irm https:\/\/\S+\/downloads\/freebuff-adblock-desktop\.ps1/.test(shippedRefusal.stdout)
+    /irm https:\/\/\S+\/downloads\/freebuff-focus-desktop\.ps1/.test(shippedRefusal.stdout)
   );
   check('and leaves that build untouched', read(k2.target) === TWO_GATES);
 }
+
+/* --------------------------------------------------------------- focus */
+
+console.log('\nfocus sessions');
+const focusTree = makeInstall();
+const sessionDir = path.join(focusTree.root, 'session-state');
+const focused = run(focusTree.app, focusTree.backups, 'focus', '1m', '-SessionDir', sessionDir);
+check('focus exits 0', focused.status, 0);
+check('it names the end of the session', /Focus until \d\d:\d\d/.test(focused.stdout));
+check('the patch went in', count(read(focusTree.target), '/*FBD-ADS-OFF:render*/'), 1);
+
+const sessionFile = path.join(sessionDir, 'session');
+check('a session file is written', fs.existsSync(sessionFile));
+check('it carries an end time', /^endsAt=\d+$/m.test(read(sessionFile)));
+
+const withSession = run(focusTree.app, focusTree.backups, 'status', '-SessionDir', sessionDir);
+check('status reports the session', /focus\s+on until \d\d:\d\d/.test(withSession.stdout));
+
+const unfocused = run(focusTree.app, focusTree.backups, 'unfocus', '-SessionDir', sessionDir);
+check('unfocus exits 0', unfocused.status, 0);
+check('it restores the original bytes', read(focusTree.target) === CURRENT);
+check('it clears the session file', fs.existsSync(sessionFile), false);
+
+const badDuration = run(focusTree.app, focusTree.backups, 'focus', 'soon', '-SessionDir', sessionDir);
+check('a duration that is not a duration is refused', badDuration.status !== 0);
+check('and it says what one looks like', /duration like 25m/.test(`${badDuration.stdout}${badDuration.stderr}`));
 
 const failed = results.filter((r) => !r).length;
 console.log('');

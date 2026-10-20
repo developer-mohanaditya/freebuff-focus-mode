@@ -38,7 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { CURRENT, GATE, RENAMED, TWO_GATES, DECOY } from './desktop-fixtures.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const TOOL = path.join(ROOT, 'desktop', 'freebuff-adblock-linux.sh');
+const TOOL = path.join(ROOT, 'desktop', 'freebuff-focus-linux.sh');
 const ORCH = 'resources/orchestrator/orchestrator.js';
 
 let results = 0;
@@ -105,7 +105,7 @@ makeDesktopFile(a.tree, '0.0.164');
 
 const version = run(a.tree, a.backups, 'version');
 check('version exits 0', version.status, 0);
-check('and prints a version', /^freebuff-adblock-desktop-linux \S+$/m.test(version.stdout), true);
+check('and prints a version', /^freebuff-focus-desktop-linux \S+$/m.test(version.stdout), true);
 
 const help = run(a.tree, a.backups, 'help');
 check('help exits 0', help.status, 0);
@@ -167,7 +167,7 @@ console.log('\nverify');
 const noProcess = run(a.tree, a.backups, 'verify', '--no-wait');
 check('verify refuses when nothing is running the patched file', noProcess.status !== 0, true);
 check('and says why', /Not verified/.test(noProcess.stdout), true);
-check('and tells you how to start it', /sh freebuff-adblock-linux\.sh verify/.test(noProcess.stdout), true);
+check('and tells you how to start it', /sh freebuff-focus-linux\.sh verify/.test(noProcess.stdout), true);
 check('verifying wrote nothing', read(a.target) === patched, true);
 
 // A stand-in for the orchestrator: the app runs it with the file as the last
@@ -244,8 +244,8 @@ const twoGates = run(c.tree, c.backups, 'install', '--no-wait');
 check('install refuses', twoGates.status !== 0, true);
 check('the render anchor reads as ambiguous', /render\s+ambiguous/.test(twoGates.stdout), true);
 check('it says why, with the counts', /match\(es\)/.test(twoGates.stdout) && /trusted as written/.test(twoGates.stdout), true);
-check('it points at the local scan', /freebuff-adblock-linux\.sh scan/.test(twoGates.stdout), true);
-check('and at the piped scan', /downloads\/freebuff-adblock-desktop-linux\.sh \| sh -s scan/.test(twoGates.stdout), true);
+check('it points at the local scan', /freebuff-focus-linux\.sh scan/.test(twoGates.stdout), true);
+check('and at the piped scan', /downloads\/freebuff-focus-desktop-linux\.sh \| sh -s scan/.test(twoGates.stdout), true);
 check('the file is left untouched', read(c.target) === TWO_GATES, true);
 check('no backup was taken', fs.existsSync(c.backups), false);
 
@@ -507,6 +507,58 @@ const badCommand = spawnSync('sh', [TOOL, 'frobnicate'], { encoding: 'utf8', cwd
 check('an unknown command is refused', badCommand.status !== 0, true);
 
 /* -------------------------------------------------------------------- syntax */
+
+/* ------------------------------------------------------ restart and focus */
+
+console.log('\nrestart on install');
+const restartTree = makeTree();
+const appRun = path.join(restartTree.tree, 'AppRun');
+fs.writeFileSync(
+  appRun,
+  [
+    '#!/bin/sh',
+    'here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1',
+    'sh -c "sleep 30; exit 0" "$here/resources/orchestrator/orchestrator.js" >/dev/null 2>&1 &',
+    'exit 0',
+    '',
+  ].join('\n')
+);
+fs.chmodSync(appRun, 0o755);
+
+const restarted = run(restartTree.tree, restartTree.backups, 'install', '--restart');
+check('--restart exits 0', restarted.status, 0);
+check('it says it is restarting', /Restarting Freebuff/.test(restarted.stdout), true);
+check('it launched the copy it patched', /started\s+\S+AppRun/.test(restarted.stdout), true);
+check('and verified the process it started', /running app is the patched file/.test(restarted.stdout), true);
+
+const quietTree = makeTree();
+const quietRun = run(quietTree.tree, quietTree.backups, 'install', '--no-restart');
+check('--no-restart still patches', count(read(quietTree.target), '/*FBD-ADS-OFF:render*/'), 1);
+check('and it never claims a restart', /started\s+\S+AppRun/.test(quietRun.stdout), false);
+
+console.log('\nfocus sessions');
+const focusTree = makeTree();
+const sessionDir = path.join(focusTree.root, 'session-state');
+const focused = run(focusTree.tree, focusTree.backups, 'focus', '1m', '--session-dir', sessionDir);
+check('focus exits 0', focused.status, 0);
+check('it names the end of the session', /Focus until \d\d:\d\d/.test(focused.stdout), true);
+check('the patch went in', count(read(focusTree.target), '/*FBD-ADS-OFF:render*/'), 1);
+
+const sessionFile = path.join(sessionDir, 'session');
+check('a session file is written', fs.existsSync(sessionFile), true);
+check('it carries an end time', /^endsAt=\d+$/m.test(read(sessionFile)), true);
+
+const withSession = run(focusTree.tree, focusTree.backups, 'status', '--session-dir', sessionDir);
+check('status reports the session', /focus\s+on until \d\d:\d\d/.test(withSession.stdout), true);
+
+const unfocused = run(focusTree.tree, focusTree.backups, 'unfocus', '--session-dir', sessionDir);
+check('unfocus exits 0', unfocused.status, 0);
+check('it restores the original bytes', read(focusTree.target) === CURRENT, true);
+check('it clears the session file', fs.existsSync(sessionFile), false);
+
+const badDuration = run(focusTree.tree, focusTree.backups, 'focus', 'soon', '--session-dir', sessionDir);
+check('a duration that is not a duration is refused', badDuration.status !== 0, true);
+check('and it says what one looks like', /duration like 25m/.test(both(badDuration)), true);
 
 console.log('\nthe script itself');
 const syntax = spawnSync('sh', ['-n', TOOL], { encoding: 'utf8' });

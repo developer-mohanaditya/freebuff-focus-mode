@@ -272,27 +272,27 @@ check(`the navbar tag reads v${VERSION}`, tag.textContent, VERSION);
 check('no second version rides along anywhere', page.document.querySelectorAll('[data-desktop-version]').length, 0);
 
 const downloads = [...page.document.querySelectorAll('a[href^="downloads/"]')].map((a) => a.getAttribute('href'));
-check(`the extension zip is a ${VERSION} file`, downloads.includes(`downloads/freebuff-adblock-${VERSION}.zip`), true);
-check(`the desktop package is a ${VERSION} file`, downloads.includes(`downloads/freebuff-adblock-desktop-${VERSION}.zip`), true);
+check(`the extension zip is a ${VERSION} file`, downloads.includes(`downloads/freebuff-focus-${VERSION}.zip`), true);
+check(`the desktop package is a ${VERSION} file`, downloads.includes(`downloads/freebuff-focus-desktop-${VERSION}.zip`), true);
 check(
   `the Windows package is a ${VERSION} file`,
-  downloads.includes(`downloads/freebuff-adblock-desktop-${VERSION}-windows.zip`),
+  downloads.includes(`downloads/freebuff-focus-desktop-${VERSION}-windows.zip`),
   true
 );
 check(
   `the Linux package is a ${VERSION} file`,
-  downloads.includes(`downloads/freebuff-adblock-desktop-${VERSION}-linux.zip`),
+  downloads.includes(`downloads/freebuff-focus-desktop-${VERSION}-linux.zip`),
   true
 );
 // Each platform's one-liner is what a reader pastes, so each has to fetch that
 // platform's own tool rather than the first one that happens to be listed.
 const linuxOneLiner = page.document.querySelector('[data-desktop-linux-command]');
-check('the Linux one-liner fetches the Linux tool', /downloads\/freebuff-adblock-desktop-linux\.sh \| sh$/.test(linuxOneLiner.textContent.trim()), true);
+check('the Linux one-liner fetches the Linux tool', /downloads\/freebuff-focus-desktop-linux\.sh \| sh$/.test(linuxOneLiner.textContent.trim()), true);
 // The .ps1 is deliberately not a download link: it is the thing the one-liner
 // pipes into `iex`, and a browser download of it would attach the
 // mark-of-the-web for no reason. It is named on the page, which is what the
 // command needs.
-check('the Windows tool is named in its one-liner', HTML.includes('downloads/freebuff-adblock-desktop.ps1'), true);
+check('the Windows tool is named in its one-liner', HTML.includes('downloads/freebuff-focus-desktop.ps1'), true);
 check(`every named file carries ${VERSION}`, downloads.filter((h) => /\d+\.\d+\.\d+/.test(h)).every((h) => h.includes(VERSION)), true);
 
 /* ------------------------------------------------------- the desktop downloads */
@@ -332,9 +332,9 @@ if (macZip && winZip && linuxZip) {
     'and each points at its own versioned package',
     [macZip, winZip, linuxZip].map((a) => a.getAttribute('href')).join(','),
     [
-      `downloads/freebuff-adblock-desktop-${VERSION}.zip`,
-      `downloads/freebuff-adblock-desktop-${VERSION}-windows.zip`,
-      `downloads/freebuff-adblock-desktop-${VERSION}-linux.zip`,
+      `downloads/freebuff-focus-desktop-${VERSION}.zip`,
+      `downloads/freebuff-focus-desktop-${VERSION}-windows.zip`,
+      `downloads/freebuff-focus-desktop-${VERSION}-linux.zip`,
     ].join(',')
   );
   check(
@@ -514,13 +514,13 @@ cached.window.fetch = async () => ({
   ok: true,
   json: async () => ({
     version: '9.9.9',
-    zip: 'downloads/freebuff-adblock-9.9.9.zip',
-    desktop: 'downloads/freebuff-adblock-desktop.sh',
-    desktopZip: 'downloads/freebuff-adblock-desktop-9.9.9.zip',
-    desktopWindows: 'downloads/freebuff-adblock-desktop.ps1',
-    desktopWindowsZip: 'downloads/freebuff-adblock-desktop-9.9.9-windows.zip',
-    desktopLinux: 'downloads/freebuff-adblock-desktop-linux.sh',
-    desktopLinuxZip: 'downloads/freebuff-adblock-desktop-9.9.9-linux.zip',
+    zip: 'downloads/freebuff-focus-9.9.9.zip',
+    desktop: 'downloads/freebuff-focus-desktop.sh',
+    desktopZip: 'downloads/freebuff-focus-desktop-9.9.9.zip',
+    desktopWindows: 'downloads/freebuff-focus-desktop.ps1',
+    desktopWindowsZip: 'downloads/freebuff-focus-desktop-9.9.9-windows.zip',
+    desktopLinux: 'downloads/freebuff-focus-desktop-linux.sh',
+    desktopLinuxZip: 'downloads/freebuff-focus-desktop-9.9.9-linux.zip',
     origin: 'https://example.test',
   }),
 });
@@ -535,29 +535,29 @@ check('every version stamp on the page heals', stamps.length >= 3 && stamps.ever
 check(
   'the zip link follows the healed version',
   cached.window.document.querySelector('[data-zip]').getAttribute('href'),
-  'downloads/freebuff-adblock-9.9.9.zip'
+  'downloads/freebuff-focus-9.9.9.zip'
 );
 
 check(
   'the Linux zip link follows the healed version too',
   cached.window.document.querySelector('[data-desktop-linux-zip]').getAttribute('href'),
-  'downloads/freebuff-adblock-desktop-9.9.9-linux.zip'
+  'downloads/freebuff-focus-desktop-9.9.9-linux.zip'
 );
 
 check(
   'and the Linux one-liner is rebuilt from the origin version.json reports',
   cached.window.document.querySelector('[data-desktop-linux-command]').textContent.trim(),
-  'curl -fsSL https://example.test/downloads/freebuff-adblock-desktop-linux.sh | sh'
+  'curl -fsSL https://example.test/downloads/freebuff-focus-desktop-linux.sh | sh'
 );
 check(
   'the Windows tool link heals with it',
   cached.window.document.querySelector('[data-desktop-win-zip]').getAttribute('href'),
-  'downloads/freebuff-adblock-desktop-9.9.9-windows.zip'
+  'downloads/freebuff-focus-desktop-9.9.9-windows.zip'
 );
 check(
   'and its one-liner is rebuilt from the origin version.json reports',
   cached.window.document.querySelector('[data-desktop-win-command]').textContent.trim(),
-  'irm https://example.test/downloads/freebuff-adblock-desktop.ps1 | iex'
+  'irm https://example.test/downloads/freebuff-focus-desktop.ps1 | iex'
 );
 
 const failed = results.filter((r) => !r).length;

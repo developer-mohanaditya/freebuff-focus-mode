@@ -198,6 +198,14 @@ function checkManifest() {
   for (const resource of manifest.declarative_net_request?.rule_resources || []) {
     referenced.push(resource.path);
     if (!resource.id) fail('ruleset is missing an id');
+    // Focus is opt-in: the ruleset ships off and background.js turns it on from
+    // the stored setting. A manifest that ships it on cancels ad requests for
+    // someone who never asked, which is the promise the listing makes.
+    if (resource.enabled !== false) {
+      fail(`ruleset ${resource.id} ships enabled - focus must be opt-in`);
+    } else {
+      pass(`ruleset ${resource.id} ships disabled (opt-in)`);
+    }
   }
 
   if (!manifest.content_scripts?.length) fail('no content_scripts declared');
@@ -699,15 +707,15 @@ function checkVersionLabels(manifest) {
 
   // The names on the page are only worth anything if the files are there.
   const expected = [
-    `freebuff-adblock-${version}.zip`,
-    `freebuff-adblock-${version}-store.zip`,
-    `freebuff-adblock-${version}-firefox.zip`,
-    `freebuff-adblock-desktop-${version}.zip`,
-    `freebuff-adblock-desktop-${version}-windows.zip`,
-    `freebuff-adblock-desktop-${version}-linux.zip`,
-    'freebuff-adblock-desktop.sh',
-    'freebuff-adblock-desktop.ps1',
-    'freebuff-adblock-desktop-linux.sh',
+    `freebuff-focus-${version}.zip`,
+    `freebuff-focus-${version}-store.zip`,
+    `freebuff-focus-${version}-firefox.zip`,
+    `freebuff-focus-desktop-${version}.zip`,
+    `freebuff-focus-desktop-${version}-windows.zip`,
+    `freebuff-focus-desktop-${version}-linux.zip`,
+    'freebuff-focus-desktop.sh',
+    'freebuff-focus-desktop.ps1',
+    'freebuff-focus-desktop-linux.sh',
   ];
   const downloads = fs.readdirSync(path.join(SITE, 'downloads'));
   const absent = expected.filter((name) => !downloads.includes(name));
@@ -907,15 +915,15 @@ function engineOf(source) {
 function checkDesktopLinux() {
   console.log('\nlinux desktop tool');
 
-  const file = path.join(ROOT, 'desktop', 'freebuff-adblock-linux.sh');
+  const file = path.join(ROOT, 'desktop', 'freebuff-focus-linux.sh');
   if (!fs.existsSync(file)) {
-    fail('desktop/freebuff-adblock-linux.sh is missing - the Linux tool does not ship');
+    fail('desktop/freebuff-focus-linux.sh is missing - the Linux tool does not ship');
     return;
   }
-  pass('desktop/freebuff-adblock-linux.sh exists');
+  pass('desktop/freebuff-focus-linux.sh exists');
 
   const source = fs.readFileSync(file, 'utf8');
-  const macSource = fs.readFileSync(path.join(ROOT, 'desktop', 'freebuff-adblock.sh'), 'utf8');
+  const macSource = fs.readFileSync(path.join(ROOT, 'desktop', 'freebuff-focus.sh'), 'utf8');
 
   for (const token of ['__FBD_VERSION__', '__FBD_ORIGIN__']) {
     source.includes(token)
@@ -987,7 +995,7 @@ function checkDesktopLinux() {
     ? pass('a refusal carries the per-anchor counts')
     : fail('the Linux refusal no longer says why an anchor did not fit');
 
-  source.includes('| sh -s scan') && source.includes('downloads/freebuff-adblock-desktop-linux.sh')
+  source.includes('| sh -s scan') && source.includes('downloads/freebuff-focus-desktop-linux.sh')
     ? pass('the Linux refusal offers the piped scan at the Linux tool\'s own URL')
     : fail('the Linux refusal points at the wrong script, or offers no piped scan');
 
@@ -1004,12 +1012,12 @@ function checkDesktopLinux() {
  * What a downloaded zip calls its tools, against what the zip tells you to run.
  *
  * This exists because it was wrong. The packaging step once named each sh tool
- * after the file it *serves* (`freebuff-adblock-desktop.sh`), while INSTALL.txt,
+ * after the file it *serves* (`freebuff-focus-desktop.sh`), while INSTALL.txt,
  * the tool's own `Usage:` block and the install page all said
- * `sh freebuff-adblock.sh` - so a reader who took the download, followed the
+ * `sh freebuff-focus.sh` - so a reader who took the download, followed the
  * read-me and typed the command it gave them got "No such file". On macOS it was
  * worse than a typo: the double-clickable `.command` launcher runs
- * `sh ./freebuff-adblock.sh install`, so it failed at the one thing it is for.
+ * `sh ./freebuff-focus.sh install`, so it failed at the one thing it is for.
  *
  * The rule is therefore: the name a zip carries is the name every instruction
  * beside it uses. Checked statically - the read-mes, the launchers and the tools'
@@ -1037,7 +1045,7 @@ function checkDesktopPackaging() {
   // Every `sh <something>.sh` an instruction tells the reader to run, collected
   // from one file. A url is never a match: the token before it is not `sh`.
   const shellCommands = (text) =>
-    new Set((text.match(/sh (?:\.\/)?freebuff-adblock[A-Za-z0-9._-]*\.sh/g) || []).map((hit) => hit.replace(/^sh (?:\.\/)?/, '')));
+    new Set((text.match(/sh (?:\.\/)?freebuff-focus[A-Za-z0-9._-]*\.sh/g) || []).map((hit) => hit.replace(/^sh (?:\.\/)?/, '')));
 
   const check = (label, text, expected) => {
     const found = [...shellCommands(text)];
@@ -1053,18 +1061,18 @@ function checkDesktopPackaging() {
 
   check('desktop/INSTALL.txt', read('desktop/INSTALL.txt'), macZipName);
   check('desktop/INSTALL-linux.txt', read('desktop/INSTALL-linux.txt'), linuxZipName);
-  check('the Linux tool\'s own help', read('desktop/freebuff-adblock-linux.sh'), linuxZipName);
-  check('the macOS tool\'s own help', read('desktop/freebuff-adblock.sh'), macZipName);
+  check('the Linux tool\'s own help', read('desktop/freebuff-focus-linux.sh'), linuxZipName);
+  check('the macOS tool\'s own help', read('desktop/freebuff-focus.sh'), macZipName);
 
   // The macOS launcher is the one place this runs by itself, so its reference is
   // checked literally rather than through the collector above.
-  read('desktop/Freebuff AdBlock.command').includes(`sh ./${macZipName}`)
+  read('desktop/Freebuff Focus.command').includes(`sh ./${macZipName}`)
     ? pass(`the .command launcher runs the file the zip carries (sh ./${macZipName})`)
     : fail(`the .command launcher does not run sh ./${macZipName} - double-clicking it would fail`);
 
   // Windows has always been consistent, and that consistency is the reason the
   // other two are checked at all.
-  read('desktop/Freebuff AdBlock.cmd').includes('freebuff-adblock-desktop.ps1')
+  read('desktop/Freebuff Focus.cmd').includes('freebuff-focus-desktop.ps1')
     ? pass('the .cmd launcher runs the .ps1 the zip carries')
     : fail('the .cmd launcher names a .ps1 that the zip does not carry');
 }
@@ -1072,12 +1080,12 @@ function checkDesktopPackaging() {
 function checkDesktopPowerShell() {
   console.log('\nwindows desktop tool');
 
-  const file = path.join(ROOT, 'desktop', 'freebuff-adblock.ps1');
+  const file = path.join(ROOT, 'desktop', 'freebuff-focus.ps1');
   if (!fs.existsSync(file)) {
-    fail('desktop/freebuff-adblock.ps1 is missing - the Windows tool does not ship');
+    fail('desktop/freebuff-focus.ps1 is missing - the Windows tool does not ship');
     return;
   }
-  pass('desktop/freebuff-adblock.ps1 exists');
+  pass('desktop/freebuff-focus.ps1 exists');
 
   const source = fs.readFileSync(file, 'utf8');
 
@@ -1085,7 +1093,7 @@ function checkDesktopPowerShell() {
   // "needs 5.1" rather than a parse error from newer syntax.
   source.includes('#Requires -Version 5.1')
     ? pass('the Windows tool declares the PowerShell version it needs')
-    : fail('desktop/freebuff-adblock.ps1 no longer declares #Requires -Version 5.1');
+    : fail('desktop/freebuff-focus.ps1 no longer declares #Requires -Version 5.1');
 
   for (const token of ['__FBD_VERSION__', '__FBD_ORIGIN__']) {
     source.includes(token)
@@ -1123,7 +1131,7 @@ function checkDesktopPowerShell() {
     ? pass('a refusal carries the per-anchor counts')
     : fail('the Windows refusal no longer says why an anchor did not fit');
 
-  source.includes('freebuff-adblock-desktop.ps1') && source.includes('scriptblock')
+  source.includes('freebuff-focus-desktop.ps1') && source.includes('scriptblock')
     ? pass('the refusal offers the piped scan, for people with no local copy')
     : fail('the Windows refusal only offers the local form, which a piped run cannot use');
 
@@ -1214,12 +1222,12 @@ function checkDesktopPowerShell() {
 function checkDesktop(manifest) {
   console.log('\ndesktop tool');
 
-  const file = path.join(ROOT, 'desktop', 'freebuff-adblock.sh');
+  const file = path.join(ROOT, 'desktop', 'freebuff-focus.sh');
   if (!fs.existsSync(file)) {
-    fail('desktop/freebuff-adblock.sh is missing');
+    fail('desktop/freebuff-focus.sh is missing');
     return;
   }
-  pass('desktop/freebuff-adblock.sh exists');
+  pass('desktop/freebuff-focus.sh exists');
 
   const source = fs.readFileSync(file, 'utf8');
 
@@ -1250,7 +1258,7 @@ function checkDesktop(manifest) {
 
   source.includes('| sh -s scan')
     ? pass('the refusal offers the piped scan for people with no local copy')
-    : fail('the refusal only offers `sh freebuff-adblock.sh scan`, which a piped run cannot use');
+    : fail('the refusal only offers `sh freebuff-focus.sh scan`, which a piped run cannot use');
 
   // The refusal path is the whole safety story: without it an unexpected
   // orchestrator would be edited with whatever matched.
@@ -1307,10 +1315,10 @@ function checkDesktop(manifest) {
     : fail('site/index.html no longer carries the desktop command and zip hooks');
 
   for (const part of [
-    'freebuff-adblock-desktop.sh',
-    'freebuff-adblock-desktop.ps1',
-    'freebuff-adblock-desktop-linux.sh',
-    'freebuff-adblock-desktop-',
+    'freebuff-focus-desktop.sh',
+    'freebuff-focus-desktop.ps1',
+    'freebuff-focus-desktop-linux.sh',
+    'freebuff-focus-desktop-',
     'data-desktop-win-command',
     'data-desktop-win-zip',
     'data-desktop-linux-command',
@@ -1332,7 +1340,7 @@ function checkDesktop(manifest) {
   // a shell - but it has to name the Linux script, or a Linux reader is handed a
   // macOS tool.
   const linuxCommand = (html.match(/<code data-desktop-linux-command>([^<]*)<\/code>/) || [])[1] || '';
-  /^curl -fsSL \S+downloads\/freebuff-adblock-desktop-linux\.sh \| sh$/.test(linuxCommand.trim())
+  /^curl -fsSL \S+downloads\/freebuff-focus-desktop-linux\.sh \| sh$/.test(linuxCommand.trim())
     ? pass(`the Linux one-liner fetches the Linux tool (${linuxCommand.trim()})`)
     : fail(`the Linux one-liner is not "curl -fsSL <linux tool> | sh": ${JSON.stringify(linuxCommand.trim())}`);
 
@@ -1380,9 +1388,9 @@ function checkDesktop(manifest) {
   // Both desktop packages have to be named after the same version the extension
   // ships under: one product, one release, one number.
   for (const name of [
-    `freebuff-adblock-desktop-${manifest.version}.zip`,
-    `freebuff-adblock-desktop-${manifest.version}-windows.zip`,
-    `freebuff-adblock-desktop-${manifest.version}-linux.zip`,
+    `freebuff-focus-desktop-${manifest.version}.zip`,
+    `freebuff-focus-desktop-${manifest.version}-windows.zip`,
+    `freebuff-focus-desktop-${manifest.version}-linux.zip`,
   ]) {
     html.includes(name)
       ? pass(`the page offers ${name}`)

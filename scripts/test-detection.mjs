@@ -40,7 +40,7 @@ const html = `<!doctype html><html><head></head><body>
         <article class="msg" id="assistant">
           <p>Replied in 33s</p>
           <pre><code>git add -A
-git commit -m "Add Freebuff Ad Block"</code></pre>
+git commit -m "Add Freebuff Focus Mode"</code></pre>
         </article>
         <div class="promo" id="card">
           <div class="promo-head"><span class="brand">Coderabbit</span><span class="ad-chip">AD</span></div>
@@ -79,7 +79,7 @@ const { document } = window;
 // Minimal chrome.* surface. State lives in this object so a saved rule can be
 // seeded before the script runs, and so the tests can read back whatever the
 // picker stored. Message listeners are captured so the picker can be triggered.
-const store = { freebuffAdBlockEnabled: true, freebuffAdBlockSelectors: ['.preseed'] };
+const store = { freebuffFocusEnabled: true, freebuffFocusSelectors: ['.preseed'] };
 const messageListeners = [];
 
 const sendMessage = (type) => messageListeners.forEach((fn) => fn({ type }, {}, () => {}));
@@ -111,7 +111,7 @@ const script = document.createElement('script');
 script.textContent = CODE;
 document.body.appendChild(script);
 
-const HIDDEN = 'fbad-hidden';
+const HIDDEN = 'fb-focus-hidden';
 const results = [];
 const hidden = (id) => document.getElementById(id).classList.contains(HIDDEN);
 const check = (name, actual, expected) => {
@@ -166,7 +166,7 @@ refreshed.textContent = 'A fresh impression, rebuilt in place.';
 document.getElementById('card').appendChild(refreshed);
 await new Promise((r) => setTimeout(r, 60));
 check('card that rebuilt its own contents stays hidden', hidden('card'), true);
-check('card is still display-blocked by the stylesheet', !!document.getElementById('freebuff-adblock-style'), true);
+check('card is still display-blocked by the stylesheet', !!document.getElementById('freebuff-focus-style'), true);
 
 // A framework re-render can rewrite className, taking the hidden class with it.
 document.getElementById('card').classList.remove(HIDDEN);
@@ -175,12 +175,12 @@ check('card stripped of the hidden class is re-hidden', hidden('card'), true);
 
 // If the page replaces its head, the stylesheet doing the hiding is gone and
 // every hide already made is inert.
-document.getElementById('freebuff-adblock-style').remove();
+document.getElementById('freebuff-focus-style').remove();
 const poke = document.createElement('div');
 poke.textContent = 'poke';
 document.querySelector('.thread').appendChild(poke);
 await new Promise((r) => setTimeout(r, 60));
-check('stylesheet is re-injected after being removed', !!document.getElementById('freebuff-adblock-style'), true);
+check('stylesheet is re-injected after being removed', !!document.getElementById('freebuff-focus-style'), true);
 
 // The strip in the preview toolbar: a badge with no anchor, sharing a row with
 // the address field and the navigation buttons.
@@ -282,7 +282,7 @@ check('strip keeps its contents in the DOM', document.getElementById('strip-ad')
 check(
   'stylesheet empties such a strip in place',
   /pointer-events: none !important/.test(
-    document.getElementById('freebuff-adblock-style').textContent
+    document.getElementById('freebuff-focus-style').textContent
   ),
   true
 );
@@ -419,17 +419,17 @@ document.querySelector('.thread').appendChild(mystery);
 await new Promise((r) => setTimeout(r, 40));
 check('unrecognised element is visible before picking', hidden('mystery-unit'), false);
 
-sendMessage('freebuff-adblock:pick');
-check('picker bar appears', !!document.getElementById('freebuff-adblock-picker'), true);
+sendMessage('freebuff-focus:pick');
+check('picker bar appears', !!document.getElementById('freebuff-focus-picker'), true);
 
 mystery.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
 await new Promise((r) => setTimeout(r, 40));
 check('picked element is hidden', hidden('mystery-unit'), true);
-check('the rule was saved', store.freebuffAdBlockSelectors.includes('#mystery-unit'), true);
-check('picker bar is gone after picking', !!document.getElementById('freebuff-adblock-picker'), false);
+check('the rule was saved', store.freebuffFocusSelectors.includes('#mystery-unit'), true);
+check('picker bar is gone after picking', !!document.getElementById('freebuff-focus-picker'), false);
 
 // Esc has to back out cleanly, leaving the page exactly as it was.
-sendMessage('freebuff-adblock:pick');
+sendMessage('freebuff-focus:pick');
 const other = document.createElement('div');
 other.id = 'other-unit';
 other.textContent = 'Another unrecognised unit';
@@ -438,8 +438,217 @@ document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubb
 other.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
 await new Promise((r) => setTimeout(r, 40));
 check('Esc cancels without hiding anything', hidden('other-unit'), false);
-check('picker bar is gone after Esc', !!document.getElementById('freebuff-adblock-picker'), false);
+check('picker bar is gone after Esc', !!document.getElementById('freebuff-focus-picker'), false);
 check('messages still visible after picking', hidden('assistant'), false);
+
+/* --------------------------------------------------------- 1.6 migration */
+
+/**
+ * The rename is only safe if a 1.6 install keeps its choice. This is a second
+ * page with a second chrome mock, because migration happens once at load: the
+ * store starts under the old names, and what it looks like afterwards is the
+ * whole assertion.
+ */
+console.log('\nmigrating a 1.6 install');
+
+const legacyStore = { freebuffAdBlockEnabled: false, freebuffAdBlockSelectors: ['.preseed'] };
+const removedKeys = [];
+const legacyDom = new JSDOM(html, {
+  runScripts: 'dangerously',
+  pretendToBeVisual: true,
+  url: 'https://freebuff.com/',
+});
+const legacyWindow = legacyDom.window;
+const legacyDocument = legacyWindow.document;
+
+// A page from the 1.6 generation: an element hidden with the old class, and the
+// old stylesheet still in the document.
+const staleHidden = legacyDocument.createElement('div');
+staleHidden.id = 'stale-hidden';
+staleHidden.className = 'fbad-hidden';
+staleHidden.textContent = 'hidden by 1.6';
+legacyDocument.querySelector('.thread').appendChild(staleHidden);
+const staleStyle = legacyDocument.createElement('style');
+staleStyle.id = 'freebuff-adblock-style';
+legacyDocument.head.appendChild(staleStyle);
+
+legacyWindow.chrome = {
+  runtime: {
+    lastError: null,
+    getManifest: () => ({ version: MANIFEST.version }),
+    sendMessage: () => undefined,
+    onMessage: { addListener: () => undefined },
+  },
+  storage: {
+    sync: {
+      get: (defaults, cb) => {
+        const out = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+          if (key in legacyStore) out[key] = legacyStore[key];
+        }
+        cb(out);
+      },
+      set: (values) => Object.assign(legacyStore, values),
+      remove: (keys) => {
+        for (const key of keys) {
+          removedKeys.push(key);
+          delete legacyStore[key];
+        }
+      },
+    },
+    session: { get: (defaults, cb) => cb(defaults), set() {} },
+    onChanged: { addListener() {} },
+  },
+};
+
+const legacyScript = legacyDocument.createElement('script');
+legacyScript.textContent = CODE;
+legacyDocument.body.appendChild(legacyScript);
+await new Promise((r) => setTimeout(r, 80));
+
+check('the old enabled value is copied to the new key', legacyStore.freebuffFocusEnabled, false);
+check('the old selectors are copied to the new key', Array.isArray(legacyStore.freebuffFocusSelectors), true);
+check('the old keys are removed afterwards', removedKeys.length, 2);
+check('the old stylesheet is gone', !!legacyDocument.getElementById('freebuff-adblock-style'), false);
+check('the old hidden class is stripped', staleHidden.className.includes('fbad-hidden'), false);
+// The class may still be on a node; what hides anything is the stylesheet, so
+// that is the state the migrated setting has to control.
+check('and the migrated setting is respected', legacyDocument.getElementById('freebuff-focus-style').disabled, true);
+check('the new stylesheet is what is installed', !!legacyDocument.getElementById('freebuff-focus-style'), true);
+
+/* ------------------------------------------------------------ fresh install */
+
+/**
+ * The pack says "ads on by default". This is that sentence, tested: a store
+ * with nothing in it must leave the stylesheet off. The class may still land on
+ * a node - the stylesheet is what hides anything - so `disabled` is the state
+ * that has to be right.
+ */
+console.log('\nfresh install');
+
+const freshStore = {};
+const freshDom = new JSDOM(html, {
+  runScripts: 'dangerously',
+  pretendToBeVisual: true,
+  url: 'https://freebuff.com/',
+});
+const freshDocument = freshDom.window.document;
+
+freshDom.window.chrome = {
+  runtime: {
+    lastError: null,
+    getManifest: () => ({ version: MANIFEST.version }),
+    sendMessage: () => undefined,
+    onMessage: { addListener: () => undefined },
+  },
+  storage: {
+    sync: {
+      get: (defaults, cb) => {
+        const out = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+          if (key in freshStore) out[key] = freshStore[key];
+        }
+        cb(out);
+      },
+      set: (values) => Object.assign(freshStore, values),
+      remove: () => undefined,
+    },
+    session: { get: (defaults, cb) => cb(defaults), set() {} },
+    onChanged: { addListener() {} },
+  },
+};
+
+const freshScript = freshDocument.createElement('script');
+freshScript.textContent = CODE;
+freshDocument.body.appendChild(freshScript);
+await new Promise((r) => setTimeout(r, 80));
+
+check('a fresh install starts with ads visible', freshDocument.getElementById('freebuff-focus-style').disabled, true);
+check('and writes no setting of its own', Object.keys(freshStore).length, 0);
+
+/* ----------------------------------------------------------- service worker */
+
+/**
+ * The install handler is the only extension code that runs outside a page, and
+ * it is where the default used to be decided a second time: `get({enabled:
+ * true})` then `set()`, which quietly turned focus on for every new install and
+ * made the listing's "ads on by default" false. A missing key is now the only
+ * carrier of the default, so the assertion is that install writes nothing.
+ */
+console.log('\nservice worker install');
+
+const BACKGROUND = fs.readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
+const installHandlers = [];
+const startupHandlers = [];
+const changedHandlers = [];
+const syncWrites = [];
+const badgeTexts = [];
+const sessionState = {};
+const syncStore = {};
+const rulesetUpdates = [];
+
+new Function('chrome', BACKGROUND)({
+  runtime: {
+    onInstalled: { addListener: (fn) => installHandlers.push(fn) },
+    onStartup: { addListener: (fn) => startupHandlers.push(fn) },
+    onMessage: { addListener: () => undefined },
+    lastError: null,
+  },
+  storage: {
+    sync: {
+      get: (defaults, cb) => cb({ ...defaults, ...syncStore }),
+      set: (values) => syncWrites.push(values),
+    },
+    session: {
+      get: (defaults, cb) => cb({ ...defaults, ...sessionState }),
+      set: (values, cb) => {
+        Object.assign(sessionState, values);
+        if (cb) cb();
+      },
+    },
+    onChanged: { addListener: (fn) => changedHandlers.push(fn) },
+  },
+  declarativeNetRequest: {
+    updateEnabledRulesets: (update, cb) => {
+      rulesetUpdates.push(update);
+      if (cb) cb();
+    },
+  },
+  action: {
+    setBadgeText: ({ text }) => badgeTexts.push(text),
+    setBadgeBackgroundColor: () => undefined,
+  },
+  tabs: { onRemoved: { addListener: () => undefined } },
+});
+
+check('the worker registers one install handler', installHandlers.length, 1);
+for (const fn of installHandlers) fn();
+check('install writes no sync setting', syncWrites.length, 0);
+check('install clears the per-tab counts', JSON.stringify(sessionState.hiddenCounts), '{}');
+check('install paints no badge', badgeTexts.length, 0);
+
+// The ruleset is the half of focus the page cannot undo, so it has to follow
+// the same setting. A missing setting means off, which is a disable, not a
+// no-op: an upgrade can leave the ruleset enabled from the previous version.
+check(
+  'a fresh install leaves network blocking off',
+  JSON.stringify(rulesetUpdates[rulesetUpdates.length - 1]),
+  JSON.stringify({ disableRulesetIds: ['focus_rules'] })
+);
+
+syncStore.freebuffFocusEnabled = true;
+rulesetUpdates.length = 0;
+for (const fn of startupHandlers) fn();
+check('a stored focus setting enables blocking at startup', JSON.stringify(rulesetUpdates[0]), JSON.stringify({ enableRulesetIds: ['focus_rules'] }));
+
+check('the worker watches the setting', changedHandlers.length > 0, true);
+rulesetUpdates.length = 0;
+for (const fn of changedHandlers) fn({ freebuffFocusEnabled: { newValue: false } }, 'sync');
+check('leaving focus turns blocking off', JSON.stringify(rulesetUpdates[0]), JSON.stringify({ disableRulesetIds: ['focus_rules'] }));
+
+rulesetUpdates.length = 0;
+for (const fn of changedHandlers) fn({ hiddenCounts: { newValue: {} } }, 'session');
+check('an unrelated storage change touches no ruleset', rulesetUpdates.length, 0);
 
 const failed = results.filter((r) => !r).length;
 console.log('');

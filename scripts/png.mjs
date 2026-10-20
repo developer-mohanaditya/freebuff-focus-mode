@@ -1,5 +1,5 @@
 /**
- * Minimal PNG encoder + the Freebuff Ad Block icon.
+ * Minimal PNG encoder + the Freebuff Focus Mode icon.
  *
  * The icons have to exist for `chrome://extensions` to accept the extension,
  * but the workspace has no image tooling and no dependencies by design. So the

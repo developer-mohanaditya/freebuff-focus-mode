@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Freebuff Focus Mode",
   "short_name": "FB Focus",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "Quiet focus sessions for freebuff.com. Ads on by default, hidden only while you focus.",
   "permissions": [
     "declarativeNetRequest",
@@ -47,8 +47,8 @@
   "declarative_net_request": {
     "rule_resources": [
       {
-        "id": "adblock_rules",
-        "enabled": true,
+        "id": "focus_rules",
+        "enabled": false,
         "path": "rules.json"
       }
     ]

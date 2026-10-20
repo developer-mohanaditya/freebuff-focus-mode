@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <!--
-  Chromium update manifest for Freebuff Ad Block.
+  Chromium update manifest for Freebuff Focus.
 
   BEFORE THIS FEED GOES LIVE:
     1. Replace YOUR_EXTENSION_ID_HERE with the real 32-character extension ID
@@ -17,6 +17,6 @@
 -->
 <gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
   <app appid='YOUR_EXTENSION_ID_HERE'>
-    <updatecheck codebase='https://freebuff-focus-mode.vercel.app/downloads/freebuff-adblock-1.6.1.zip' version='1.6.1' />
+    <updatecheck codebase='https://freebuff-focus-mode.vercel.app/downloads/freebuff-focus-1.7.0.zip' version='1.7.0' />
   </app>
 </gupdate>

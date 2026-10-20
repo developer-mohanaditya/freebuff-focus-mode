@@ -1,5 +1,10 @@
 # Handoff
 
+> **Historical snapshot (1.6 era).** The paths, URLs and command names below are
+> the ones this project used before the 1.7.0 rename. `README.md` is the current
+> documentation. This is kept because the reasoning is still useful, not because
+> any of it is still true of the shipped tool.
+
 State of the project at the point the Freebuff Cloud workspace was retired.
 `README.md` is the permanent documentation; this file is the temporary memory
 that would otherwise have lived in the chat. Delete it once the open items below

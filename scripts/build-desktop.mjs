@@ -1,11 +1,11 @@
 /**
  * Desktop-tool packaging.
- * *   desktop/  ->  site/downloads/freebuff-adblock-desktop.sh
- *              ->  site/downloads/freebuff-adblock-desktop.ps1
- *              ->  site/downloads/freebuff-adblock-desktop-linux.sh
- *              ->  site/downloads/freebuff-adblock-desktop-<version>.zip          (macOS)
- *              ->  site/downloads/freebuff-adblock-desktop-<version>-windows.zip  (Windows)
- *              ->  site/downloads/freebuff-adblock-desktop-<version>-linux.zip    (Linux)
+ * *   desktop/  ->  site/downloads/freebuff-focus-desktop.sh
+ *              ->  site/downloads/freebuff-focus-desktop.ps1
+ *              ->  site/downloads/freebuff-focus-desktop-linux.sh
+ *              ->  site/downloads/freebuff-focus-desktop-<version>.zip          (macOS)
+ *              ->  site/downloads/freebuff-focus-desktop-<version>-windows.zip  (Windows)
+ *              ->  site/downloads/freebuff-focus-desktop-<version>-linux.zip    (Linux)
  *
  * `<version>` is the app version, read from extension/manifest.json by
  * build.mjs and handed in here - the extension and the desktop tools are one
@@ -41,20 +41,20 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DESKTOP_DIR = path.join(ROOT, 'desktop');
 const DOWNLOADS_DIR = path.join(ROOT, 'site', 'downloads');
 
-const SH_SOURCE = 'freebuff-adblock.sh';
-const SH_LAUNCHER = 'Freebuff AdBlock.command';
+const SH_SOURCE = 'freebuff-focus.sh';
+const SH_LAUNCHER = 'Freebuff Focus.command';
 const SH_NOTES = 'INSTALL.txt';
 
-const PS_SOURCE = 'freebuff-adblock.ps1';
-const PS_LAUNCHER = 'Freebuff AdBlock.cmd';
+const PS_SOURCE = 'freebuff-focus.ps1';
+const PS_LAUNCHER = 'Freebuff Focus.cmd';
 const PS_NOTES = 'INSTALL-windows.txt';
 
-const LINUX_SOURCE = 'freebuff-adblock-linux.sh';
+const LINUX_SOURCE = 'freebuff-focus-linux.sh';
 const LINUX_NOTES = 'INSTALL-linux.txt';
 
-const SCRIPT_NAME = 'freebuff-adblock-desktop.sh';
-const WINDOWS_SCRIPT_NAME = 'freebuff-adblock-desktop.ps1';
-const LINUX_SCRIPT_NAME = 'freebuff-adblock-desktop-linux.sh';
+const SCRIPT_NAME = 'freebuff-focus-desktop.sh';
+const WINDOWS_SCRIPT_NAME = 'freebuff-focus-desktop.ps1';
+const LINUX_SCRIPT_NAME = 'freebuff-focus-desktop-linux.sh';
 
 /**
  * What a downloaded zip calls each tool - deliberately *not* the served name.
@@ -65,25 +65,25 @@ const LINUX_SCRIPT_NAME = 'freebuff-adblock-desktop-linux.sh';
  * and everything that reader is told to type comes from three places that agree
  * with each other: INSTALL.txt / INSTALL-linux.txt, the `Usage:` block the tool
  * prints for `help`, and the commands in its own output. All of them say
- * `sh freebuff-adblock.sh` and `sh freebuff-adblock-linux.sh`, because those are
+ * `sh freebuff-focus.sh` and `sh freebuff-focus-linux.sh`, because those are
  * the source files' names - so those are the names the zip has to carry. Named
  * after the served file instead, a downloaded zip told its user to run a file
- * that was not there, and the macOS `.command` launcher - `sh ./freebuff-adblock.sh`
+ * that was not there, and the macOS `.command` launcher - `sh ./freebuff-focus.sh`
  * - failed on the double-click it exists for. Windows never had the problem,
  * because there the served name is the name the tool documents.
  */
-const ZIP_TOOL_NAME = 'freebuff-adblock.sh';
-const ZIP_LINUX_TOOL_NAME = 'freebuff-adblock-linux.sh';
-const ZIP_NAME = (version) => `freebuff-adblock-desktop-${version}.zip`;
-const WINDOWS_ZIP_NAME = (version) => `freebuff-adblock-desktop-${version}-windows.zip`;
-const LINUX_ZIP_NAME = (version) => `freebuff-adblock-desktop-${version}-linux.zip`;
+const ZIP_TOOL_NAME = 'freebuff-focus.sh';
+const ZIP_LINUX_TOOL_NAME = 'freebuff-focus-linux.sh';
+const ZIP_NAME = (version) => `freebuff-focus-desktop-${version}.zip`;
+const WINDOWS_ZIP_NAME = (version) => `freebuff-focus-desktop-${version}-windows.zip`;
+const LINUX_ZIP_NAME = (version) => `freebuff-focus-desktop-${version}-linux.zip`;
 
 /**
  * Only files this step owns - an extension package is never touched here.
- * `freebuff-adblock-desktop.sh` and `freebuff-adblock-desktop.ps1` are the two
+ * `freebuff-focus-desktop.sh` and `freebuff-focus-desktop.ps1` are the two
  * served tools; the rest are version-suffixed packages.
  */
-const OURS = /^freebuff-adblock-desktop(-linux)?(\.[a-z0-9]+|(-[\d.]+)?(-windows|-linux)?\.zip)$/;
+const OURS = /^freebuff-focus-desktop(-linux)?(\.[a-z0-9]+|(-[\d.]+)?(-windows|-linux)?\.zip)$/;
 
 function log(...parts) {
   console.log('[desktop]', ...parts);

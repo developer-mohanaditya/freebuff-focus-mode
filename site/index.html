@@ -26,7 +26,7 @@
            inspected and released together, so this tag carries the same number
            as every file name in downloads/ - the extension zips and the desktop
            package all read <version>, and this is the only version there is. -->
-      <span class="pill">v<span data-version>1.6.1</span></span>
+      <span class="pill">v<span data-version>1.7.0</span></span>
     </header>
 
     <main>
@@ -200,9 +200,9 @@
                 new path again.
               </p>
               <div class="copy-row">
-                <a class="copy copy-download" data-zip href="downloads/freebuff-adblock-1.6.1.zip" download>Download extension</a>
+                <a class="copy copy-download" data-zip href="downloads/freebuff-focus-1.7.0.zip" download>Download extension</a>
                 <span class="or-simply">Or simply,</span>
-                <code data-download-path>/downloads/freebuff-adblock-1.6.1.zip</code>
+                <code data-download-path>/downloads/freebuff-focus-1.7.0.zip</code>
                 <button type="button" class="copy" data-copy>Copy</button>
               </div>
             </div>
@@ -226,7 +226,7 @@
               <h3>Choose Load unpacked</h3>
               <p>
                 Press <strong>Load unpacked</strong> and select the extracted
-                <code>freebuff-adblock</code> folder, the one containing
+                <code>freebuff-focus</code> folder, the one containing
                 <code>manifest.json</code>. The toolbar icon appears and you are done.
               </p>
             </div>
@@ -378,28 +378,28 @@
               revert to support free access.
             </p>
             <div class="copy-row">
-              <code data-desktop-command>curl -fsSL https://freebuff-focus-mode.vercel.app/downloads/freebuff-adblock-desktop.sh | sh</code>
+              <code data-desktop-command>curl -fsSL https://freebuff-focus-mode.vercel.app/downloads/freebuff-focus-desktop.sh | sh</code>
               <button type="button" class="copy" data-copy>Copy</button>
             </div>
             <p class="fine">
-              Prefer a file? <a data-desktop-zip href="downloads/freebuff-adblock-desktop-1.6.1.zip" download>Download
+              Prefer a file? <a data-desktop-zip href="downloads/freebuff-focus-desktop-1.7.0.zip" download>Download
               the tool</a>, a zip with a double-clickable launcher and a short read-me, then run
-              <code>sh freebuff-adblock.sh install</code>.
+              <code>sh freebuff-focus.sh install</code>.
             </p>
             <p class="fine">
               Report what is applied, and change nothing:
-              <code>sh freebuff-adblock.sh status</code>. Check what the app you have open
+              <code>sh freebuff-focus.sh status</code>. Check what the app you have open
               actually loaded, it waits for the relaunch and then says so:
-              <code>sh freebuff-adblock.sh verify</code>. Undo it:
-              <code>sh freebuff-adblock.sh revert</code>.
+              <code>sh freebuff-focus.sh verify</code>. Undo it:
+              <code>sh freebuff-focus.sh revert</code>.
             </p>
             <p class="fine">
-              Tool v<span data-version>1.6.1</span>, matched to Freebuff Desktop
+              Tool v<span data-version>1.7.0</span>, matched to Freebuff Desktop
               <strong>0.0.164</strong>: while applied, it quiets the ad auction and pauses the ad
               client API path, and it undoes its own write if the result does not check
               out. If a Freebuff release moves code it cannot recognise, it refuses and
               prints the counts it saw instead of guessing, and
-              <code>sh freebuff-adblock.sh scan</code> prints what the installed build actually
+              <code>sh freebuff-focus.sh scan</code> prints what the installed build actually
               contains, changing nothing. An older Freebuff with a different arrangement is
               refused, not half-patched.
             </p>
@@ -409,11 +409,12 @@
             <h3>After you run it</h3>
             <ol class="mini-steps">
               <li>
-                <strong>Quit Freebuff completely</strong> (⌘Q) and reopen it. The orchestrator is
-                read once at launch, so bringing the window forward is not enough. The tool waits
-                for that relaunch and then reports what it finds: whether the running process
+                <strong>It restarts Freebuff for you.</strong> The orchestrator is read once at
+                launch, so bringing the window forward is not enough - the tool quits the app,
+                starts it again, and then reports what it finds: whether the running process
                 started after the patch was written, and whether the ad code it targets is still in
-                the build. Ctrl-C stops the wait.
+                the build. Ctrl-C stops the wait, and <code>--no-restart</code> leaves the quitting
+                to you.
               </li>
               <li>
                 <strong>If macOS says “Operation not permitted”</strong>, it is App Management
@@ -444,7 +445,7 @@
               original file before it touches anything, and <code>revert</code> puts it back.
             </p>
             <div class="copy-row">
-              <code data-desktop-win-command>irm https://freebuff-focus-mode.vercel.app/downloads/freebuff-adblock-desktop.ps1 | iex</code>
+              <code data-desktop-win-command>irm https://freebuff-focus-mode.vercel.app/downloads/freebuff-focus-desktop.ps1 | iex</code>
               <button type="button" class="copy" data-copy>Copy</button>
             </div>
             <!-- The same shape as the macOS panel's download: an inline link in the
@@ -453,24 +454,24 @@
                  at a higher specificity than `.btn-primary`, which paints orange
                  text on the orange fill. See the guard in site/styles.css. -->
             <p class="fine">
-              Prefer a file? <a data-desktop-win-zip href="downloads/freebuff-adblock-desktop-1.6.1-windows.zip" download>Download
+              Prefer a file? <a data-desktop-win-zip href="downloads/freebuff-focus-desktop-1.7.0-windows.zip" download>Download
               the tool</a>, a zip with a double-clickable launcher and a short read-me. A saved
               file carries the mark-of-the-web, so either unblock it first with
-              <code>Unblock-File .\freebuff-adblock-desktop.ps1</code>, or run it the way the
+              <code>Unblock-File .\freebuff-focus-desktop.ps1</code>, or run it the way the
               launcher does:
-              <code>powershell -ExecutionPolicy Bypass -File .\freebuff-adblock-desktop.ps1 install</code>.
+              <code>powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 install</code>.
             </p>
             <p class="fine">
               The other commands need the scriptblock form, because <code>iex</code> takes a
               string and nothing else:
-              <code>$s = irm …/downloads/freebuff-adblock-desktop.ps1; &amp; ([scriptblock]::Create($s)) status</code>.
+              <code>$s = irm …/downloads/freebuff-focus-desktop.ps1; &amp; ([scriptblock]::Create($s)) status</code>.
               <code>status</code> reports what is applied and changes nothing,
               <code>verify</code> waits for the relaunch and then says what the app you have open
               actually loaded, <code>scan</code> prints every anchor this build has, and
               <code>revert</code> restores the untouched original.
             </p>
             <p class="fine">
-              Tool v<span data-version>1.6.1</span>, anchored against Freebuff Desktop
+              Tool v<span data-version>1.7.0</span>, anchored against Freebuff Desktop
               <strong>0.0.164</strong>, the same two anchors as the macOS tool: it forces the ad
               auction to return nothing and cuts the ad client off from its API, and it undoes its
               own write if the result does not check out. It finds the install itself (the per-user
@@ -488,12 +489,12 @@
             <h3>After you run it</h3>
             <ol class="mini-steps">
               <li>
-                <strong>Quit Freebuff completely</strong> and reopen it, from the tray icon, or
-                by ending <code>Freebuff.exe</code> in Task Manager. The orchestrator is read once
-                at launch, so bringing the window forward is not enough. The tool waits for that
-                relaunch and then reports what it finds: whether the running process started after
-                the patch was written, and whether the ad code it targets is still in the build.
-                Ctrl-C stops the wait; an interrupted wait prints no verdict.
+                <strong>It restarts Freebuff for you.</strong> The orchestrator is read once at
+                launch, so bringing the window forward is not enough - the tool closes the app,
+                starts it again, and then reports what it finds: whether the running process
+                started after the patch was written, and whether the ad code it targets is still in
+                the build. Ctrl-C stops the wait; an interrupted wait prints no verdict, and
+                <code>-NoRestart</code> leaves the closing and reopening to you.
               </li>
               <li>
                 <strong>If it says Freebuff has the file open</strong>, that is Windows refusing to
@@ -529,27 +530,27 @@
               it instead.
             </p>
             <div class="copy-row">
-              <code data-desktop-linux-command>curl -fsSL https://freebuff-focus-mode.vercel.app/downloads/freebuff-adblock-desktop-linux.sh | sh</code>
+              <code data-desktop-linux-command>curl -fsSL https://freebuff-focus-mode.vercel.app/downloads/freebuff-focus-desktop-linux.sh | sh</code>
               <button type="button" class="copy" data-copy>Copy</button>
             </div>
             <!-- Inline link, like the other two panels: see the note in the
                  Windows panel and the `:not(.btn)` guard in styles.css. -->
             <p class="fine">
-              Prefer a file? <a data-desktop-linux-zip href="downloads/freebuff-adblock-desktop-1.6.1-linux.zip" download>Download
+              Prefer a file? <a data-desktop-linux-zip href="downloads/freebuff-focus-desktop-1.7.0-linux.zip" download>Download
               the tool</a>, a zip with the script and a short read-me, then run
-              <code>sh freebuff-adblock-linux.sh</code>.
+              <code>sh freebuff-focus-linux.sh</code>.
             </p>
             <p class="fine">
               Report what is applied, and change nothing:
-              <code>sh freebuff-adblock-linux.sh status</code>. Check what the copy you started
+              <code>sh freebuff-focus-linux.sh status</code>. Check what the copy you started
               actually loaded, it waits for the relaunch and then says so:
-              <code>sh freebuff-adblock-linux.sh verify</code>. Undo it:
-              <code>sh freebuff-adblock-linux.sh revert</code>. Pointed at a directory
+              <code>sh freebuff-focus-linux.sh verify</code>. Undo it:
+              <code>sh freebuff-focus-linux.sh revert</code>. Pointed at a directory
               instead, an AppDir you extracted yourself, it patches in place, exactly like the
               macOS tool.
             </p>
             <p class="fine">
-              Tool v<span data-version>1.6.1</span>, anchored against Freebuff Desktop
+              Tool v<span data-version>1.7.0</span>, anchored against Freebuff Desktop
               <strong>0.0.164</strong>, the same two anchors, verified against the real Linux
               build: it forces the ad auction to return nothing and cuts the ad client off from its
               API, and it undoes its own write if the result does not check out. It looks for
@@ -566,15 +567,17 @@
             <h3>After you run it</h3>
             <ol class="mini-steps">
               <li>
-                <strong>Start the patched copy, not the image.</strong> The path is printed for
-                you, and it is under <code>~/.local/share/freebuff-adblock</code>. The orchestrator
-                is read once at launch, so the patch only takes effect on the next start. Your
-                original <code>.AppImage</code> is untouched, keep it as the unpatched fallback,
-                because running it still shows ads.
+                <strong>The image is replaced by the patched copy.</strong> If Freebuff is running
+                from the image, the tool stops it and starts the extracted, patched copy instead;
+                if nothing was running, it prints that <code>AppRun</code> path for you, under
+                <code>~/.local/share/freebuff-focus</code>. The orchestrator is read once at launch,
+                so the patch only takes effect on the next start. Your original
+                <code>.AppImage</code> is untouched, keep it as the unpatched fallback, because
+                running it still shows ads.
               </li>
               <li>
                 <strong>Then check what it loaded:</strong>
-                <code>sh freebuff-adblock-linux.sh verify</code>. It waits for something to be
+                <code>sh freebuff-focus-linux.sh verify</code>. It waits for something to be
                 running the patched file, then compares when the patch was written against when
                 that process started. Ctrl-C stops the wait; an interrupted wait prints no verdict.
               </li>
@@ -673,7 +676,7 @@
         </div>
       </div>
       <p>
-        Freebuff Focus Mode · v<span data-version>1.6.1</span> · ads on by default, no accounts, no
+        Freebuff Focus Mode · v<span data-version>1.7.0</span> · ads on by default, no accounts, no
         telemetry.
       </p>
       <p class="fine">

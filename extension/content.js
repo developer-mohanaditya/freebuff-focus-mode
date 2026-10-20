@@ -1,5 +1,5 @@
 /**
- * Freebuff Ad Block - content script
+ * Freebuff Focus Mode - content script
  *
  * Network rules (rules.json) stop ad requests before they leave the browser,
  * but they cannot see markup freebuff.com renders client-side while it is
@@ -35,14 +35,25 @@
 (() => {
   'use strict';
 
-  const STYLE_ID = 'freebuff-adblock-style';
-  const HIDDEN_CLASS = 'fbad-hidden';
-  const ENABLED_KEY = 'freebuffAdBlockEnabled';
-  const PING_TYPE = 'freebuff-adblock:ping';
-  const PICK_TYPE = 'freebuff-adblock:pick';
-  const CUSTOM_KEY = 'freebuffAdBlockSelectors';
-  const CUSTOM_STYLE_ID = 'freebuff-adblock-custom';
-  const PICK_BAR_ID = 'freebuff-adblock-picker';
+  const STYLE_ID = 'freebuff-focus-style';
+  const HIDDEN_CLASS = 'fb-focus-hidden';
+  const ENABLED_KEY = 'freebuffFocusEnabled';
+  const PING_TYPE = 'freebuff-focus:ping';
+  const PICK_TYPE = 'freebuff-focus:pick';
+  const CUSTOM_KEY = 'freebuffFocusSelectors';
+  const CUSTOM_STYLE_ID = 'freebuff-focus-custom';
+  const PICK_BAR_ID = 'freebuff-focus-picker';
+
+  // Read-only legacy names, and the only two words in this file that mention
+  // the old product. 1.6 stored its settings and its hidden class under these,
+  // so a rename without a read would look like a fresh install to anyone who
+  // had already turned the old toggle off - their choice would be silently
+  // reset to the default. They are read once, copied to the new names, and
+  // removed. Nothing writes them again.
+  const LEGACY_ENABLED_KEY = 'freebuffAdBlockEnabled';
+  const LEGACY_CUSTOM_KEY = 'freebuffAdBlockSelectors';
+  const LEGACY_HIDDEN_CLASS = 'fbad-hidden';
+  const LEGACY_STYLE_ID = 'freebuff-adblock-style';
   const PICK_BAR_STYLE =
     'position:fixed;z-index:2147483647;top:12px;left:50%;transform:translateX(-50%);' +
     'background:#0d1017;color:#e9edf5;font:12px/1.4 ui-sans-serif,system-ui,sans-serif;' +
@@ -300,7 +311,11 @@
   let customSelectors = [];
   let customStyleEl = null;
   let styleEl = null;
-  let enabled = true;
+  // Off until storage says otherwise. The store copy promises ads on by
+  // default, focus opt-in, and an install that hides before its first read
+  // would be that promise broken in the one direction that matters. A 1.6
+  // install has a stored value and keeps its choice; a fresh one starts here.
+  let enabled = false;
   let observer = null;
   const pending = new Set();
   const pendingBadges = new Set();
@@ -963,7 +978,7 @@
     if (!count) return;
     try {
       const result = chrome.runtime.sendMessage({
-        type: 'freebuff-adblock:hidden',
+        type: 'freebuff-focus:hidden',
         count,
       });
       if (result && typeof result.catch === 'function') result.catch(() => {});
@@ -974,15 +989,66 @@
 
   /* ------------------------------------------------------------------- state */
 
+  /**
+   * Copy a 1.6 setting to its 1.7 name, once. Returns the value to use either
+   * way, so the caller never has to care which generation wrote it.
+   */
+  function migrate(value) {
+    const next = {};
+
+    if (typeof value[ENABLED_KEY] !== 'boolean' && typeof value[LEGACY_ENABLED_KEY] === 'boolean') {
+      next[ENABLED_KEY] = value[LEGACY_ENABLED_KEY];
+    }
+    if (!Array.isArray(value[CUSTOM_KEY]) && Array.isArray(value[LEGACY_CUSTOM_KEY])) {
+      next[CUSTOM_KEY] = value[LEGACY_CUSTOM_KEY];
+    }
+
+    if (Object.keys(next).length === 0) return value;
+
+    try {
+      chrome.storage.sync.set(next);
+      // remove() is absent in the test harness and present in the browser; a
+      // migration that cannot clean up must still migrate.
+      if (chrome.storage.sync.remove) chrome.storage.sync.remove([LEGACY_ENABLED_KEY, LEGACY_CUSTOM_KEY]);
+    } catch {
+      /* the copy above is what matters; the old keys are harmless */
+    }
+
+    return { ...value, ...next };
+  }
+
+  /**
+   * Half a version of history, cleared rather than left in the page: the old
+   * stylesheet and the class it hid things with. Without this, elements hidden
+   * by 1.6 stay hidden under a class 1.7 never looks at - and they would never
+   * come back, which is the one outcome this tool must not produce.
+   */
+  function clearLegacy() {
+    const old = document.getElementById(LEGACY_STYLE_ID);
+    if (old) old.remove();
+    for (const node of document.querySelectorAll(`.${LEGACY_HIDDEN_CLASS}`)) {
+      node.classList.remove(LEGACY_HIDDEN_CLASS);
+    }
+  }
+
   function readState() {
     try {
-      chrome.storage.sync.get({ [ENABLED_KEY]: true, [CUSTOM_KEY]: [] }, (value) => {
-        if (chrome.runtime.lastError) return;
-        const saved = value[CUSTOM_KEY];
-        customSelectors = Array.isArray(saved) ? saved : [];
-        injectCustomStyle();
-        setEnabled(value[ENABLED_KEY]);
-      });
+      chrome.storage.sync.get(
+        {
+          [ENABLED_KEY]: null,
+          [CUSTOM_KEY]: null,
+          [LEGACY_ENABLED_KEY]: null,
+          [LEGACY_CUSTOM_KEY]: null,
+        },
+        (value) => {
+          if (chrome.runtime.lastError) return;
+          const state = migrate(value);
+          const saved = state[CUSTOM_KEY];
+          customSelectors = Array.isArray(saved) ? saved : [];
+          injectCustomStyle();
+          setEnabled(typeof state[ENABLED_KEY] === 'boolean' ? state[ENABLED_KEY] : false);
+        }
+      );
 
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area !== 'sync') return;
@@ -1001,7 +1067,7 @@
         setEnabled(changes[ENABLED_KEY].newValue);
       });
     } catch {
-      enabled = true;
+      enabled = false;
     }
   }
 
@@ -1010,6 +1076,7 @@
   function init() {
     if (document.getElementById(STYLE_ID)) return;
 
+    clearLegacy();
     injectStyle();
     injectCustomStyle();
     readState();

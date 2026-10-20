@@ -1,4 +1,4 @@
-Freebuff AdBlock for Desktop - Windows  (v__FBD_VERSION__)
+Freebuff Focus for Desktop - Windows  (v__FBD_VERSION__)
 ==========================================================
 
 Blocks the ads Freebuff Desktop renders from the orchestrator it ships inside its
@@ -13,13 +13,13 @@ There is no dependency here, no package manager and no runtime to fetch.
 WHAT IS IN THIS FOLDER
 ----------------------
 
-  Freebuff AdBlock.cmd             Double-click this. It opens PowerShell and
+  Freebuff Focus.cmd             Double-click this. It opens PowerShell and
                                    patches the app.
 
-  freebuff-adblock-desktop.ps1     The tool itself, if you would rather run it by
+  freebuff-focus-desktop.ps1     The tool itself, if you would rather run it by
                                    hand:
 
-                                     powershell -ExecutionPolicy Bypass -File .\freebuff-adblock-desktop.ps1 install
+                                     powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 install
 
 USING IT
 --------
@@ -32,11 +32,11 @@ USING IT
 
      -App "D:\Apps\Freebuff"
 
-2. Double-click "Freebuff AdBlock.cmd", or run one of:
+2. Double-click "Freebuff Focus.cmd", or run one of:
 
-     powershell -ExecutionPolicy Bypass -File .\freebuff-adblock-desktop.ps1 install
+     powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 install
 
-     irm __FBD_ORIGIN__/downloads/freebuff-adblock-desktop.ps1 | iex
+     irm __FBD_ORIGIN__/downloads/freebuff-focus-desktop.ps1 | iex
 
    The second one is the one-liner and it is the easier of the two, for a reason
    worth knowing: nothing is written to disk, so Windows never tags it as a
@@ -44,15 +44,15 @@ USING IT
    applies. Double-clicking the .cmd passes -ExecutionPolicy Bypass for the same
    reason. If Windows still refuses a file you saved yourself, run:
 
-     Unblock-File .\freebuff-adblock-desktop.ps1
+     Unblock-File .\freebuff-focus-desktop.ps1
 
-3. Quit Freebuff completely and reopen it. The orchestrator is read once at
-   launch, so the patch only takes effect on the next start - focusing the window
-   is not enough. The tool waits for that relaunch and then reports what it finds -
-   whether the process running now started after the patch was written - so the
-   patch does not have to be taken on trust. The wait ends by itself after five
-   minutes (use -Timeout SECONDS to change that), and Ctrl-C stops it at any time.
-   An interrupted wait prints no verdict, so run verify again if you want one.
+3. The tool patches, then closes and restarts Freebuff for you, and waits for the
+   new process to prove it read the patched file. The orchestrator is read once
+   at launch, so a running app has to be restarted - focusing the window is not
+   enough. The wait ends by itself after five minutes (use -Timeout SECONDS to
+   change that), and Ctrl-C stops it at any time. An interrupted wait prints no
+   verdict, so run verify again if you want one. -NoRestart leaves the quitting
+   and reopening to you.
 
 If the tool says Freebuff has the file open, quit it from the tray icon (or end
 Freebuff.exe in Task Manager) and run it again. If Windows refuses the write on an
@@ -63,16 +63,24 @@ for a password and never elevates by itself.
 OTHER COMMANDS
 --------------
 
-  powershell -ExecutionPolicy Bypass -File .\freebuff-adblock-desktop.ps1 status    report what is applied - changes nothing
-  powershell -ExecutionPolicy Bypass -File .\freebuff-adblock-desktop.ps1 verify    wait for the relaunch, then check what it loaded
-  powershell -ExecutionPolicy Bypass -File .\freebuff-adblock-desktop.ps1 scan      show every anchor this build has - changes nothing
-  powershell -ExecutionPolicy Bypass -File .\freebuff-adblock-desktop.ps1 revert    restore the untouched original
-  powershell -ExecutionPolicy Bypass -File .\freebuff-adblock-desktop.ps1 doctor    environment report, for a bug report
+  powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 status    report what is applied - changes nothing
+  powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 verify    wait for the relaunch, then check what it loaded
+  powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 scan      show every anchor this build has - changes nothing
+  powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 revert    restore the untouched original
+  powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 doctor    environment report, for a bug report
+
+A session is the patch plus an end time:
+
+  powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 focus 25m   install and remember the duration
+  powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 unfocus      restore, and clear the session
+
+There is no timer process. status reads the timestamp, and a session that runs
+out leaves the patch in place until you run unfocus.
 
 The same commands work through the one-liner, because `iex` takes a string and
 nothing else:
 
-  $s = irm __FBD_ORIGIN__/downloads/freebuff-adblock-desktop.ps1; & ([scriptblock]::Create($s)) scan
+  $s = irm __FBD_ORIGIN__/downloads/freebuff-focus-desktop.ps1; & ([scriptblock]::Create($s)) scan
 
 AFTER A FREEBUFF UPDATE
 -----------------------
@@ -87,11 +95,11 @@ afterwards disagrees. When an anchor does not fit, install refuses and prints th
 counts it saw - "render ambiguous, literal: 2 match(es)" - so you can see whether
 the shape changed or only the number of times it appears. To get the full report:
 
-  powershell -ExecutionPolicy Bypass -File .\freebuff-adblock-desktop.ps1 scan
+  powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 scan
 
 or, with no local copy to point at:
 
-  $s = irm __FBD_ORIGIN__/downloads/freebuff-adblock-desktop.ps1; & ([scriptblock]::Create($s)) scan
+  $s = irm __FBD_ORIGIN__/downloads/freebuff-focus-desktop.ps1; & ([scriptblock]::Create($s)) scan
 
 Both list every candidate site the build has, write a copy to your backup folder,
 and touch nothing inside the app.
@@ -103,7 +111,7 @@ A patch on disk is not a patch in effect. The orchestrator is read once, when
 Freebuff starts, so patching a running app changes nothing until it is relaunched.
 That is what `verify` is for:
 
-  powershell -ExecutionPolicy Bypass -File .\freebuff-adblock-desktop.ps1 verify
+  powershell -ExecutionPolicy Bypass -File .\freebuff-focus-desktop.ps1 verify
 
 It waits for Freebuff to be quit and reopened, then compares two times - when the
 patch was written, and when the process running now started. Started later means

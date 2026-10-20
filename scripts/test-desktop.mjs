@@ -38,7 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { CURRENT, GATE, RENAMED, TWO_GATES, DECOY } from './desktop-fixtures.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const TOOL = path.join(ROOT, 'desktop', 'freebuff-adblock.sh');
+const TOOL = path.join(ROOT, 'desktop', 'freebuff-focus.sh');
 const TOOL_SOURCE = fs.readFileSync(TOOL, 'utf8');
 
 /* -------------------------------------------------------------------- harness */
@@ -165,8 +165,8 @@ const twoGates = run(c.app, c.backups, 'install');
 check('install refuses', twoGates.status !== 0);
 check('the render anchor reads as ambiguous', /render\s+ambiguous/.test(twoGates.stdout));
 check('it says why, with the counts', /match\(es\)/.test(twoGates.stdout) && /trusted as written/.test(twoGates.stdout));
-check('it points at the local scan', /freebuff-adblock\.sh scan/.test(twoGates.stdout));
-check('and at the piped one', /freebuff-adblock-desktop\.sh \| sh -s scan/.test(twoGates.stdout));
+check('it points at the local scan', /freebuff-focus\.sh scan/.test(twoGates.stdout));
+check('and at the piped one', /freebuff-focus-desktop\.sh \| sh -s scan/.test(twoGates.stdout));
 check('the file is left untouched', read(c.target) === TWO_GATES);
 check('no backup was taken', fs.existsSync(c.backups), false);
 
@@ -287,7 +287,7 @@ const idle = run(v.app, v.backups, 'verify', '--no-wait');
 check('verify exits non-zero with Freebuff closed', idle.status !== 0);
 check('it reports both anchors applied', /render\s+applied/.test(idle.stdout) && /request\s+applied/.test(idle.stdout));
 check('it says Freebuff is not open', /Freebuff is not open/.test(idle.stdout));
-check('it points at running verify again', /freebuff-adblock\.sh verify/.test(idle.stdout));
+check('it points at running verify again', /freebuff-focus\.sh verify/.test(idle.stdout));
 check('verify changes nothing in the bundle', read(v.target) === patchedBytes);
 
 const noTimeout = run(v.app, v.backups, 'verify', '--no-wait', '--timeout', 'soon');
@@ -331,7 +331,9 @@ const already = spawn(
 already.unref();
 
 await new Promise((resolve) => setTimeout(resolve, 400));
-run(stale.app, stale.backups, 'install');
+// --no-restart is what pins this scenario: with the 1.7 default, install would
+// restart the app it found, and there would be no stale process left to refuse.
+run(stale.app, stale.backups, 'install', '--no-restart');
 stampPatchTime(stale.target, 60);
 const notYet = run(stale.app, stale.backups, 'verify', '--no-wait');
 retire(already);
@@ -380,6 +382,84 @@ check('the wait ends by itself once the app comes back', waitedCode, 0);
 check('and it reaches the same verdict', /running app is the patched file/.test(waitOut));
 check('and it still wrote nothing', read(v.target) === patchedBytes);
 
+/* ------------------------------------------------------ restart and focus */
+
+/**
+ * The 1.7 lifecycle: install no longer asks the reader to quit and reopen, it
+ * does both. `open` is the only macOS-specific command in that path, so a fake
+ * one on PATH is the whole harness - it records the launch and starts a process
+ * whose command line ends with the orchestrator path, which is exactly the shape
+ * `verify` looks for.
+ */
+console.log('\nrestart on install');
+
+const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'fbd-open-'));
+const openLog = path.join(fakeBin, 'launched.log');
+fs.writeFileSync(
+  path.join(fakeBin, 'open'),
+  [
+    '#!/bin/sh',
+    'app=""',
+    'while [ $# -gt 0 ]; do',
+    '  case "$1" in -a) shift; app="$1" ;; esac',
+    '  shift',
+    'done',
+    '[ -n "$app" ] || exit 1',
+    'printf "%s\\n" "$app" >> "$FAKE_OPEN_LOG"',
+    'sh -c "sleep 30; exit 0" "$app/Contents/Resources/orchestrator/orchestrator.js" >/dev/null 2>&1 &',
+    'exit 0',
+    '',
+  ].join('\n')
+);
+fs.chmodSync(path.join(fakeBin, 'open'), 0o755);
+
+const runRestart = (app, backups, ...args) =>
+  spawnSync('sh', [TOOL, ...args, '--app', app, '--backup-dir', backups], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, FAKE_OPEN_LOG: openLog },
+  });
+
+const r = makeBundle();
+const forced = runRestart(r.app, r.backups, 'install', '--restart');
+check('--restart exits 0', forced.status, 0);
+check('it says it is restarting', /Restarting Freebuff/.test(forced.stdout));
+check('it launched the app it patched', read(openLog).includes(r.app));
+check('and verified the process it started', /running app is the patched file/.test(forced.stdout));
+
+// The opposite flag: nothing is touched, and the reader is told what to do.
+const quiet = makeBundle();
+const quietRun = run(quiet.app, quiet.backups, 'install', '--no-restart');
+check('--no-restart still patches', count(read(quiet.target), '/*FBD-ADS-OFF:render*/'), 1);
+check('and it asks the reader to quit and reopen', /Open Freebuff\./.test(quietRun.stdout));
+check('and it never claims a restart', /restarted Freebuff/.test(quietRun.stdout), false);
+
+console.log('\nfocus sessions');
+const s = makeBundle();
+const sessionDir = path.join(s.root, 'session-state');
+const focused = run(s.app, s.backups, 'focus', '1m', '--session-dir', sessionDir);
+check('focus exits 0', focused.status, 0);
+check('it names the time the session ends', /Focus until \d\d:\d\d/.test(focused.stdout));
+check('the patch went in', count(read(s.target), '/*FBD-ADS-OFF:render*/'), 1);
+
+const sessionFile = path.join(sessionDir, 'session');
+check('a session file is written', fs.existsSync(sessionFile));
+check('it carries an end time', /^endsAt=\d+$/m.test(read(sessionFile)));
+check('nothing else is left in that folder', fs.readdirSync(sessionDir).length, 1);
+
+const withSession = run(s.app, s.backups, 'status', '--session-dir', sessionDir);
+check('status reports the session', /focus\s+on until \d\d:\d\d/.test(withSession.stdout));
+check('and still reports the patch', /Ads are off/.test(withSession.stdout));
+
+const ended = run(s.app, s.backups, 'unfocus', '--session-dir', sessionDir);
+check('unfocus exits 0', ended.status, 0);
+check('it restores the original bytes', read(s.target) === CURRENT);
+check('it clears the session file', fs.existsSync(sessionFile), false);
+
+const badDuration = run(s.app, s.backups, 'focus', 'soon', '--session-dir', sessionDir);
+check('a duration that is not a duration is refused', badDuration.status !== 0);
+check('and it says what one looks like', /duration like 25m/.test(`${badDuration.stdout}${badDuration.stderr}`));
+check('and nothing is patched', read(s.target) === CURRENT);
+
 /* ---------------------------------------------------- the shipped artifact */
 
 /**
@@ -389,7 +469,7 @@ check('and it still wrote nothing', read(v.target) === patchedBytes);
  * it is built by `npm run build`, so a missing or stale one is a build away.
  */
 console.log('\nthe stamped artifact in site/downloads');
-const STAMPED = path.join(ROOT, 'site', 'downloads', 'freebuff-adblock-desktop.sh');
+const STAMPED = path.join(ROOT, 'site', 'downloads', 'freebuff-focus-desktop.sh');
 
 if (!fs.existsSync(STAMPED)) {
   console.log('  (not built yet - skipping; run npm run build)');

@@ -6,8 +6,13 @@
  * directly, so it keeps working even if the tab is mid-navigation.
  */
 
-const ENABLED_KEY = 'freebuffAdBlockEnabled';
+const ENABLED_KEY = 'freebuffFocusEnabled';
 const COUNTS_KEY = 'hiddenCounts';
+
+// Read-only legacy names, kept only so a 1.6 setting survives the rename. See
+// the same block in content.js: read once, copy, delete.
+const LEGACY_ENABLED_KEY = 'freebuffAdBlockEnabled';
+const LEGACY_CUSTOM_KEY = 'freebuffAdBlockSelectors';
 
 // Kept in sync with SITE_ORIGIN in scripts/build.mjs.
 const INSTALL_URL = 'https://freebuff-focus-mode.vercel.app/';
@@ -27,15 +32,50 @@ function renderToggle(enabled) {
   stateText.classList.toggle('on', enabled);
 }
 
-chrome.storage.sync.get({ [ENABLED_KEY]: true }, (value) => {
-  if (chrome.runtime.lastError) return;
-  renderToggle(value[ENABLED_KEY]);
-});
+/**
+ * Move a 1.6 setting to its 1.7 name, once, then hand the merged state to the
+ * caller. One read instead of two so the popup cannot paint half a migration.
+ */
+function readState(cb) {
+  chrome.storage.sync.get(
+    {
+      [ENABLED_KEY]: null,
+      [CUSTOM_KEY]: null,
+      [LEGACY_ENABLED_KEY]: null,
+      [LEGACY_CUSTOM_KEY]: null,
+    },
+    (value) => {
+      if (chrome.runtime.lastError) return;
+
+      const next = {};
+      if (typeof value[ENABLED_KEY] !== 'boolean' && typeof value[LEGACY_ENABLED_KEY] === 'boolean') {
+        next[ENABLED_KEY] = value[LEGACY_ENABLED_KEY];
+      }
+      if (!Array.isArray(value[CUSTOM_KEY]) && Array.isArray(value[LEGACY_CUSTOM_KEY])) {
+        next[CUSTOM_KEY] = value[LEGACY_CUSTOM_KEY];
+      }
+      if (Object.keys(next).length > 0) {
+        chrome.storage.sync.set(next);
+        if (chrome.storage.sync.remove) chrome.storage.sync.remove([LEGACY_ENABLED_KEY, LEGACY_CUSTOM_KEY]);
+      }
+
+      cb({ ...value, ...next });
+    }
+  );
+}
 
 toggle.addEventListener('click', () => {
   const next = toggle.getAttribute('aria-checked') !== 'true';
   renderToggle(next);
   chrome.storage.sync.set({ [ENABLED_KEY]: next });
+  // Anything already cancelled at the network layer stays cancelled until the
+  // page is fetched again, so say that rather than implying a live switch.
+  renderStatus(
+    next
+      ? 'Focusing. Ads stay out from the next load'
+      : 'Focus off. Reload freebuff.com to bring ads back',
+    next ? 'live' : 'warn'
+  );
 });
 
 /* -------------------------------------------------------------------- count */
@@ -58,8 +98,8 @@ function readCount(tabId) {
 
 /* -------------------------------------------------------- user-picked rules */
 
-const PICK_TYPE = 'freebuff-adblock:pick';
-const CUSTOM_KEY = 'freebuffAdBlockSelectors';
+const PICK_TYPE = 'freebuff-focus:pick';
+const CUSTOM_KEY = 'freebuffFocusSelectors';
 
 const pickButton = document.getElementById('pick');
 const customCountEl = document.getElementById('customCount');
@@ -72,9 +112,13 @@ function renderCustom(list) {
   clearButton.hidden = count === 0;
 }
 
-chrome.storage.sync.get({ [CUSTOM_KEY]: [] }, (value) => {
-  if (chrome.runtime.lastError) return;
-  renderCustom(value[CUSTOM_KEY]);
+readState((state) => {
+  renderToggle(typeof state[ENABLED_KEY] === 'boolean' ? state[ENABLED_KEY] : false);
+  renderCustom(state[CUSTOM_KEY]);
+
+  const version = chrome.runtime.getManifest().version;
+  const badge = document.getElementById('version');
+  if (badge) badge.textContent = `v${version}`;
 });
 
 pickButton.addEventListener('click', () => {
@@ -100,7 +144,7 @@ clearButton.addEventListener('click', () => {
 /* ------------------------------------------------------------------- status */
 
 const statusEl = document.getElementById('statusText');
-const PING_TYPE = 'freebuff-adblock:ping';
+const PING_TYPE = 'freebuff-focus:ping';
 const SITE_URL = /^https?:\/\/([a-z0-9-]+\.)*freebuff\.com(\/|$)/i;
 
 function renderStatus(text, kind) {
