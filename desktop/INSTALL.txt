@@ -1,4 +1,4 @@
-Freebuff AdBlock for Desktop  (v__FBD_VERSION__)
+Freebuff Focus for Desktop  (v__FBD_VERSION__)
 =================================================
 
 Blocks the ads Freebuff Desktop renders from the orchestrator it ships inside
@@ -7,27 +7,27 @@ its own app bundle.
 WHAT IS IN THIS FOLDER
 ----------------------
 
-  Freebuff AdBlock.command   Double-click this. It opens Terminal and patches
+  Freebuff Focus.command   Double-click this. It opens Terminal and patches
                              the app.
 
-  freebuff-adblock.sh        The tool itself, if you would rather run it by hand:
+  freebuff-focus.sh        The tool itself, if you would rather run it by hand:
 
-                               sh freebuff-adblock.sh install
+                               sh freebuff-focus.sh install
 
 USING IT
 --------
 
 1. Freebuff Desktop must be installed (usually /Applications/Freebuff.app).
 
-2. Double-click "Freebuff AdBlock.command", or run:
+2. Double-click "Freebuff Focus.command", or run:
 
-     sh freebuff-adblock.sh install
+     sh freebuff-focus.sh install
 
-3. Quit Freebuff completely (Cmd-Q) and reopen it. The orchestrator is read
-   once at launch, so the patch only takes effect on the next start - focusing
-   the window is not enough. The tool waits for that relaunch and then reports
-   what the app it finds is actually running, so the patch does not have to be
-   taken on trust. Ctrl-C stops the wait at any time.
+3. The tool patches, then quits and reopens Freebuff for you, and waits for the
+   new process to prove it read the patched file. The orchestrator is read once
+   at launch, so a running app has to be restarted - focusing the window is not
+   enough. If Freebuff was closed, open it when the tool says so. Ctrl-C stops
+   the wait at any time, and --no-restart leaves the quitting to you.
 
 macOS may ask you for permission the first time, because this writes inside an
 app bundle. If you see "Operation not permitted", open:
@@ -40,11 +40,28 @@ app, and run the tool again. It never asks for a password and never uses sudo.
 OTHER COMMANDS
 --------------
 
-  sh freebuff-adblock.sh status    report what is applied - changes nothing
-  sh freebuff-adblock.sh verify    wait for the relaunch, then check what it loaded
-  sh freebuff-adblock.sh scan      show every anchor this build has - changes nothing
-  sh freebuff-adblock.sh revert    restore the untouched original
-  sh freebuff-adblock.sh doctor    environment report, for a bug report
+  sh freebuff-focus.sh status    report what is applied - changes nothing
+  sh freebuff-focus.sh verify    wait for the relaunch, then check what it loaded
+  sh freebuff-focus.sh scan      show every anchor this build has - changes nothing
+  sh freebuff-focus.sh revert    restore the untouched original
+  sh freebuff-focus.sh doctor    environment report, for a bug report
+
+
+FOCUS SESSIONS
+--------------
+
+A session is the patch plus an end time. It is the same install, so it is the
+same reversibility:
+
+  sh freebuff-focus.sh focus 25m    install, and remember that you meant 25m
+  sh freebuff-focus.sh status       shows "focus on until 14:20" while it lasts
+  sh freebuff-focus.sh unfocus      restore the original, and clear the session
+
+25m is the default, and 90m, 2h and a plain number of minutes all parse. There
+is no timer process: the timestamp is a file, status reads it, and a session
+that runs out leaves the patch where it is until you run unfocus. That is
+stated rather than hidden, because a background job that could revert a patch
+is a background job that could revert one at the wrong time.
 
 AFTER A FREEBUFF UPDATE
 -----------------------
@@ -60,9 +77,9 @@ refuses and prints the counts it saw - "render ambiguous, literal: 2 match(es)"
 - so you can see whether the shape changed or only the number of times it
 appears. To get the full report:
 
-  sh freebuff-adblock.sh scan                     (a local copy of the tool)
+  sh freebuff-focus.sh scan                     (a local copy of the tool)
 
-  curl -fsSL __FBD_ORIGIN__/downloads/freebuff-adblock-desktop.sh | sh -s scan
+  curl -fsSL __FBD_ORIGIN__/downloads/freebuff-focus-desktop.sh | sh -s scan
 
 Both list every candidate site the build has, write a copy to your backup
 folder, and touch nothing inside the app. The piped one is for when you ran the
@@ -75,7 +92,7 @@ A patch on disk is not a patch in effect. The orchestrator is read once, when
 Freebuff starts, so patching a running app changes nothing until it is
 relaunched. That is what `verify` is for:
 
-  sh freebuff-adblock.sh verify
+  sh freebuff-focus.sh verify
 
 It waits for Freebuff to be quit and reopened, then compares two times - when the
 patch was written, and when the process running now started. Started later means
@@ -84,8 +101,8 @@ the ad code still in the build, so you can see the patch is aimed at something
 real rather than at code that has moved. `install` runs the same check for you
 whenever Freebuff is open, which is why it sits and waits after patching.
 
-  sh freebuff-adblock.sh verify --no-wait       report now, do not wait
-  sh freebuff-adblock.sh verify --timeout 60    wait at most a minute
+  sh freebuff-focus.sh verify --no-wait       report now, do not wait
+  sh freebuff-focus.sh verify --timeout 60    wait at most a minute
 
 The one thing none of this can see is whether an ad break still appears - that is
 the app's behaviour, and only you can watch it. On the free tier, run a turn and

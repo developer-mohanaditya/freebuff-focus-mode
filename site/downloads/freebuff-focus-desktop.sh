@@ -1,27 +1,13 @@
 #!/bin/sh
 #
-# Freebuff AdBlock for Desktop - Linux
+# Freebuff Focus for Desktop
 #
 # Freebuff Desktop renders ads from the orchestrator process it ships inside its
-# own application directory - `resources/orchestrator/orchestrator.js`, run by the
+# own .app bundle - `Contents/Resources/orchestrator/orchestrator.js`, run by the
 # bundled Bun, not from `app.asar`. A browser extension can never reach it, which
-# is why this exists as a separate, local tool. The macOS tool patches the same
-# file at the same relative path; the two scripts share their anchors byte for
-# byte, and `npm run validate` asserts that.
+# is why this exists as a separate, local tool.
 #
-# Linux differs from macOS in one way that shapes everything else: Freebuff ships
-# as an AppImage - a single executable holding a read-only SquashFS filesystem.
-# There is no install directory and no bundle to edit in place. So this tool never
-# writes to the .AppImage, because it cannot: it extracts the image with the
-# runtime the image itself carries (`--appimage-extract`, no dependencies, no
-# FUSE, no root), keeps the extracted copy under `--work-dir`, patches that, and
-# tells you how to run it. The original download is left exactly as it was.
-#
-# Pointed at an ordinary directory instead - an extracted AppDir, or a system
-# install such as `/opt/Freebuff` if Freebuff ever ships one - it patches in place,
-# exactly like the macOS tool.
-#
-# This script disables the ad runtime. It is deliberately boring:
+# This script disables the ad runtime in place. It is deliberately boring:
 #
 #   - It only touches the ad code, at two anchors: the gate the ad auction
 #     consults is forced to return "no ads to show", and the ad client's own
@@ -36,29 +22,29 @@
 #   - It backs up the pristine file before the first write, and `revert` puts it
 #     back.
 #
-# It patches a copy you own, so nothing here needs root. A system-wide install
-# under /opt or /usr would, and the tool says so rather than reaching for sudo.
+# It writes into an app bundle, so macOS App Management has to let your terminal
+# do that. If it is blocked, the tool says exactly what to switch on instead of
+# failing halfway through a write.
 #
 # Usage:
-#   sh freebuff-adblock-linux.sh            # install (the default)
-#   sh freebuff-adblock-linux.sh status     # report what is applied, change nothing
-#   sh freebuff-adblock-linux.sh install    # patch, backing up first
-#   sh freebuff-adblock-linux.sh verify     # wait for the relaunch, check what it loaded
-#   sh freebuff-adblock-linux.sh revert     # restore the pristine backup
-#   sh freebuff-adblock-linux.sh doctor     # environment report for a bug report
-#   sh freebuff-adblock-linux.sh scan       # show the anchors this build has (for a re-anchor)
+#   sh freebuff-focus.sh            # install (the default)
+#   sh freebuff-focus.sh status     # report what is applied, change nothing
+#   sh freebuff-focus.sh install    # patch, backing up first
+#   sh freebuff-focus.sh verify     # wait for the relaunch, check what it loaded
+#   sh freebuff-focus.sh revert     # restore the pristine backup
+#   sh freebuff-focus.sh doctor     # environment report for a bug report
+#   sh freebuff-focus.sh scan       # show the anchors this build has (for a re-anchor)
 #
-#   --app PATH          the Freebuff .AppImage to extract, or an AppDir to patch
-#                       in place (default: search your home directory and /opt)
-#   --work-dir PATH     where the extracted copy is kept
+#   --app PATH          the Freebuff.app to patch (default: /Applications)
 #   --display-only      skip the ad-API anchor (leave the render gate only)
 #   --dry-run           with install: report what would happen, write nothing
 #   --backup-dir PATH   where the pristine copy lives
+#   --resign            ad-hoc re-sign the bundle after patching
 #   --no-wait           verify: report now instead of waiting for a relaunch
 #   --timeout SECONDS   verify: how long to wait (default 300)
 #
-# Every Freebuff update ships a new .AppImage, so the patched copy is left behind
-# by one. Run `install` again against the new image after an update.
+# Every Freebuff update replaces Contents/Resources, so the patch is gone after
+# one. Run `install` again after an update.
 #
 # The patch is only half the answer: the orchestrator is read once at launch, so
 # a patched file with an old process in memory is a patched file doing nothing.
@@ -71,16 +57,25 @@
 set -u
 
 # Stamped at build time (scripts/build-desktop.mjs).
-VERSION="1.6.1"
+VERSION="1.7.0"
 ORIGIN="https://freebuff-focus-mode.vercel.app"
 
-BACKUP_DIR="${FREEBUFF_ADBLOCK_BACKUP_DIR:-$HOME/freebuff-patch-backups}"
-# Where an AppImage is extracted to. One directory per Freebuff version, so an
-# update adds a copy instead of overwriting the one you are running.
-WORK_DIR="${FREEBUFF_ADBLOCK_WORK_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/freebuff-adblock}"
+# The backup folder keeps its 1.6 name on purpose: renaming it would orphan every
+# pristine copy an existing install already wrote, and those are exactly what
+# `revert` restores. The override is new; the old one still works.
+BACKUP_DIR="${FREEBUFF_FOCUS_BACKUP_DIR:-$HOME/freebuff-patch-backups}"
+# Where a focus session is recorded. One small file, no daemon: the session ends
+# when its timestamp passes, whether or not this tool is ever run again.
+SESSION_DIR="${FREEBUFF_FOCUS_SESSION_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/freebuff-focus}"
 APP="${FREEBUFF_APP:-}"
 DEEP=1
 DRY=0
+RESIGN=0
+# auto   - restart only when Freebuff was open when the patch was written
+# always - quit and relaunch even when it was closed (--restart)
+# never  - never touch a process (--no-restart)
+RESTART=auto
+FOCUS_ARG=""
 # Waiting is the point of `verify`, and it is only ever done when Freebuff is
 # open - a closed app has no relaunch to observe, and an unattended install must
 # not sit here. The wait is bounded anyway, and Ctrl-C stops it.
@@ -106,22 +101,30 @@ hr() { printf '%s\n' "${DIM}--------------------------------------------${OFF}";
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    install|status|verify|revert|doctor|scan|help|version) COMMAND="$1"; shift ;;
+    install|status|verify|revert|doctor|scan|focus|unfocus|help|version) COMMAND="$1"; shift ;;
     --app=*) APP="${1#--app=}"; shift ;;
     --backup-dir=*) BACKUP_DIR="${1#--backup-dir=}"; shift ;;
-    --work-dir=*) WORK_DIR="${1#--work-dir=}"; shift ;;
+    --session-dir=*) SESSION_DIR="${1#--session-dir=}"; shift ;;
     --app) shift; [ $# -gt 0 ] || die "--app needs a path"; APP="$1"; shift ;;
     --backup-dir) shift; [ $# -gt 0 ] || die "--backup-dir needs a path"; BACKUP_DIR="$1"; shift ;;
-    --work-dir) shift; [ $# -gt 0 ] || die "--work-dir needs a path"; WORK_DIR="$1"; shift ;;
+    --session-dir) shift; [ $# -gt 0 ] || die "--session-dir needs a path"; SESSION_DIR="$1"; shift ;;
     --display-only) DEEP=0; shift ;;
     --deep) DEEP=1; shift ;;
     --dry-run) DRY=1; shift ;;
+    --resign) RESIGN=1; shift ;;
+    --restart) RESTART=always; shift ;;
+    --no-restart) RESTART=never; shift ;;
     --no-wait) WAIT=0; shift ;;
     --timeout) shift; [ $# -gt 0 ] || die "--timeout needs a number of seconds"; WAIT_SECS="$1"; shift ;;
     --timeout=*) WAIT_SECS="${1#--timeout=}"; shift ;;
     -h|--help) COMMAND=help; shift ;;
     --version) COMMAND=version; shift ;;
-    *) die "unknown argument: $1  (try --help)" ;;
+    *)
+      # `focus 25m` - the duration is the one positional argument this tool
+      # takes, and only focus takes it.
+      if [ "$COMMAND" = "focus" ] && [ -z "$FOCUS_ARG" ]; then FOCUS_ARG="$1"; shift
+      else die "unknown argument: $1  (try --help)"
+      fi ;;
   esac
 done
 
@@ -133,255 +136,37 @@ esac
 
 # --------------------------------------------------------------------- helpers
 
-# ------------------------------------------------------- finding the app
-#
-# Two shapes mean the same thing on Linux, and the tool has to tell them apart
-# before it writes anything:
-#
-#   tree   a directory holding `resources/orchestrator/orchestrator.js`. That is
-#          an AppImage someone already extracted, a system install, or the copy
-#          this tool extracted itself. Patchable in place.
-#   image  a `*.AppImage`. A single executable wrapping a read-only SquashFS, so
-#          there is nothing to patch in it. It gets extracted first, and the
-#          image itself is never opened for writing.
-
-is_tree() {
-  [ -f "$1/resources/orchestrator/orchestrator.js" ]
-}
-
-image_is_elf() {
-  # Every AppImage is an ELF executable carrying its own SquashFS runtime.
-  # Checked rather than assumed: extracting a file that is not one would fail
-  # with a message from the runtime instead of a sentence about what is wrong.
-  [ -f "$1" ] || return 1
-  [ "$(od -An -tx1 -N4 "$1" 2>/dev/null | tr -d ' \n')" = "7f454c46" ]
-}
-
-# The AppImage's own embedded runtime does the extraction: no squashfs-tools, no
-# FUSE, no root, nothing to install first. This is the one operation that makes
-# the Linux tool possible at all.
-extract_image() {
-  image="$1"; dest="$2"
-
-  if [ ! -x "$image" ]; then
-    # Worth doing rather than just complaining: the file needs the bit to run at
-    # all, chmod is exactly what every AppImage guide tells people to run, and
-    # this is their own download. It is reported, never silent.
-    chmod +x "$image" 2>/dev/null || true
-    if [ -x "$image" ]; then
-      # stderr, because this function's stdout is the tree path and nothing else.
-      printf '%s\n' "  note     set the executable bit on the image (chmod +x)" >&2
-    else
-      die "$image is not executable, and could not be made executable.
-  Run:  chmod +x '$image'"
-    fi
+find_app() {
+  if [ -n "$APP" ]; then
+    [ -d "$APP/Contents/Resources/orchestrator" ] || die "not a Freebuff app bundle: $APP"
+    printf '%s\n' "$APP"
+    return 0
   fi
-
-  image_is_elf "$image" || die "$image is not an AppImage (not an ELF executable).
-  Pass --app the Freebuff .AppImage, or a directory to patch in place."
-
-  mkdir -p "$dest" || die "cannot create $dest"
-  log="$dest/.extract.log"
-  if ! ( cd "$dest" && "$image" --appimage-extract ) >"$log" 2>&1; then
-    tail -n 5 "$log" 2>/dev/null >&2
-    die "could not extract $image - see $log"
-  fi
-  rm -f "$log"
-
-  [ -d "$dest/squashfs-root" ] || die "$image extracted no squashfs-root directory"
-  is_tree "$dest/squashfs-root" || die "this AppImage has no resources/orchestrator/orchestrator.js.
-  Either it is not Freebuff, or Freebuff changed where the orchestrator lives."
-  printf '%s' "$dest/squashfs-root"
-}
-
-# Where this image's extracted copy lives: one directory per version, so a new
-# download never overwrites the copy you are running.
-work_dir_for_image() {
-  printf '%s/freebuff-%s' "$WORK_DIR" "$(image_version "$1")"
-}
-
-# The version an image's file name carries, from the leading number after
-# `Freebuff-`: `Freebuff-0.0.164-linux-x86_64.AppImage` and a renamed
-# `Freebuff-0.0.164.AppImage` both give `0.0.164`. Matching the leading run
-# rather than splitting on `-linux` is deliberate - people rename downloads, and
-# `unknown` costs a per-version work directory and a backup name.
-image_version() {
-  # It has to end on a digit: `Freebuff-0.0.164.AppImage` would otherwise yield
-  # `0.0.164.`, and a version with a dot in it becomes a directory name with a
-  # dot in it - which reads as a typo in every message that prints it.
-  v="$(printf '%s' "${1##*/}" | sed -n 's/^[Ff]reebuff-\([0-9][0-9.]*[0-9]\).*/\1/p')"
-  [ -n "$v" ] || v=unknown
-  printf '%s' "$v"
-}
-
-# An extracted AppDir records the version it came from, which is what names the
-# backup. A system install may record nothing; `unknown` is honest and the new
-# file still gets its own backup name.
-tree_version() {
-  for f in "$1"/*.desktop; do
-    [ -f "$f" ] || continue
-    v="$(sed -n 's/^X-AppImage-Version=//p' "$f" 2>/dev/null | head -n 1)"
-    if [ -n "$v" ]; then printf '%s' "$v"; return 0; fi
-  done
-  printf 'unknown'
-}
-
-# Every place a Freebuff AppImage is likely to be. `doctor` prints this list, so
-# a tool that finds nothing says where it looked instead of just failing.
-app_search_paths() {
-  printf '%s\n' \
-    "$HOME/Applications" "$HOME/Downloads" "$HOME/.local/bin" "$HOME/bin" \
-    "$HOME/Desktop" "/opt" "/usr/local/bin" "$PWD"
-}
-
-find_image() {
-  for dir in $(app_search_paths); do
-    [ -d "$dir" ] || continue
-    for f in "$dir"/*Freebuff*.AppImage; do
-      [ -f "$f" ] || continue
-      printf '%s\n' "$f"
+  for candidate in "/Applications/Freebuff.app" "$HOME/Applications/Freebuff.app"; do
+    if [ -d "$candidate/Contents/Resources/orchestrator" ]; then
+      printf '%s\n' "$candidate"
       return 0
-    done
+    fi
   done
   return 1
 }
 
-# Resolution is two lines - kind, then path - because the caller has to know
-# which one it has before it can decide whether writing is even possible:
-#
-#   tree      a directory to patch in place
-#   image     an AppImage to extract first
-#
-# Line-oriented rather than tab-separated so a path containing any character at
-# all still parses.
-resolve_app() {
-  if [ -n "$APP" ]; then
-    if [ -d "$APP" ]; then
-      is_tree "$APP" || die "not a Freebuff application directory: $APP
-  Expected $APP/resources/orchestrator/orchestrator.js to exist."
-      printf 'tree\n%s\n' "$APP"
-      return 0
-    fi
-    if [ -f "$APP" ]; then
-      printf 'image\n%s\n' "$APP"
-      return 0
-    fi
-    die "no such file or directory: $APP"
+app_version() {
+  plist="$1/Contents/Info.plist"
+  if [ -x /usr/libexec/PlistBuddy ] && [ -f "$plist" ]; then
+    v="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist" 2>/dev/null || true)"
+    if [ -n "$v" ]; then printf '%s' "$v"; return 0; fi
   fi
-
-  # A copy this tool extracted before is the likeliest thing to mean, and it is
-  # the one a previous run patched - so it comes first.
-  for candidate in "$WORK_DIR"/*/squashfs-root; do
-    [ -d "$candidate" ] || continue
-    is_tree "$candidate" || continue
-    printf 'tree\n%s\n' "$candidate"
-    return 0
-  done
-
-  found="$(find_image)" || return 1
-  printf 'image\n%s\n' "$found"
-  return 0
+  if [ "$(uname -s)" = "Darwin" ] && [ -f "$plist" ]; then
+    v="$(defaults read "$plist" CFBundleShortVersionString 2>/dev/null || true)"
+    if [ -n "$v" ]; then printf '%s' "$v"; return 0; fi
+  fi
+  printf 'unknown'
 }
 
-# One call at the top of every command: resolve the app, extract it when it is
-# an image, and hand back the tree to work on.
-#
-#   prep persistent   keep the extracted copy under --work-dir (install, revert,
-#                     verify: these all have to agree on one tree)
-#   prep ephemeral    extract into a temporary directory and remove it on exit
-#                     (status, scan: read-only, and nobody asked for 400 MB of
-#                     extracted app to be left behind)
-#
-# Sets APP_KIND (tree|image), APP_PATH (what --app pointed at), APP_TREE (what to
-# patch) and APP_VERSION. Dies rather than guessing when nothing is found.
-# Read-only commands extract to a temporary directory; everything else keeps the
-# copy under --work-dir so install, revert and verify all agree on one tree.
-prep() {
-  want="${PREP:-persistent}"
-
-  # `die` inside a command substitution only ends the subshell, so a failure is
-  # turned into an exit here, where it ends the run. The reason it printed is
-  # already on stderr - which is why nothing is added on the --app path.
-  if [ -n "$APP" ]; then
-    res="$(resolve_app)" || exit 1
-  else
-    res="$(resolve_app)" || die "Freebuff Desktop was not found.
-  Pass --app /path/to/Freebuff-<version>-linux-x86_64.AppImage, or a directory
-  holding resources/orchestrator/orchestrator.js.
-  Looked in: $(app_search_paths | tr '\n' ' ')"
-  fi
-
-  APP_KIND="$(printf '%s\n' "$res" | sed -n 1p)"
-  APP_PATH="$(printf '%s\n' "$res" | sed -n 2p)"
-  APP_TREE="$APP_PATH"
-
-  if [ "$APP_KIND" = "image" ]; then
-    APP_VERSION="$(image_version "$APP_PATH")"
-    dest="$(work_dir_for_image "$APP_PATH")"
-
-    # Already extracted - by this tool, from this image. Reuse it rather than
-    # extracting again: it is the tree a previous install patched.
-    if is_tree "$dest/squashfs-root"; then
-      APP_TREE="$dest/squashfs-root"
-      # A copy already on disk knows its own version even when the image was
-      # renamed, so the report and the backup name stop saying "unknown".
-      if [ "$APP_VERSION" = "unknown" ]; then APP_VERSION="$(tree_version "$APP_TREE")"; fi
-      return 0
-    fi
-
-    if [ "$want" = "ephemeral" ]; then
-      TMP_TREE="$(mktemp -d "${TMPDIR:-/tmp}/fbd-image.XXXXXX")" || die "cannot create a temporary directory"
-      # Persisted for the life of this process only; the trap is what guarantees
-      # the copy does not outlive it.
-      trap 'rm -rf "$TMP_TREE"' EXIT INT TERM
-      say ""
-      say "  extracting $APP_PATH"
-      say "  ${DIM}-> a temporary copy, removed when this finishes${OFF}"
-      APP_TREE="$(extract_image "$APP_PATH" "$TMP_TREE")" || exit 1
-      if [ "$APP_VERSION" = "unknown" ]; then APP_VERSION="$(tree_version "$APP_TREE")"; fi
-      return 0
-    fi
-
-    say ""
-    say "  extracting $APP_PATH"
-    say "  ${DIM}-> $dest${OFF}"
-    say "  ${DIM}(once per version; later runs reuse this copy)${OFF}"
-    APP_TREE="$(extract_image "$APP_PATH" "$dest")" || exit 1
-    if [ "$APP_VERSION" = "unknown" ]; then APP_VERSION="$(tree_version "$APP_TREE")"; fi
-    return 0
-  fi
-
-  APP_VERSION="$(tree_version "$APP_PATH")"
-}
-
-# The same header in every report: what was resolved, and what is being read.
-show_app() {
-  if [ "$APP_KIND" = "image" ]; then
-    say "  image    $APP_PATH"
-    say "  copy     $APP_TREE"
-  else
-    say "  app      $APP_TREE"
-  fi
-  say "  version  $APP_VERSION"
-  say "  target   $APP_TREE/resources/orchestrator/orchestrator.js"
-}
-
-# Any process actually running an orchestrator out of this tree. `pgrep -f`
-# matches any command line that merely mentions the path, so the command line has
-# to *end* with it - see orchestrator_pids below.
-orchestrator_running() {
-  [ -n "$(orchestrator_pids "$1")" ]
-}
-
-# Processes running the orchestrator out of an image that is mounted but not
-# patched, i.e. the original download. Informational: it is how the tool can say
-# "quit that first" without pretending the patch applies to it.
-mount_pids() {
+app_running() {
   command -v pgrep >/dev/null 2>&1 || return 1
-  for pid in $(pgrep -f '/tmp/.mount_.*/resources/orchestrator/orchestrator.js' 2>/dev/null); do
-    cmd="$(ps -p "$pid" -o command= 2>/dev/null | sed 's/[[:space:]]*$//')"
-    case "$cmd" in */.mount_*/resources/orchestrator/orchestrator.js) printf '%s\n' "$pid" ;; esac
-  done
+  pgrep -x Freebuff >/dev/null 2>&1
 }
 
 #
@@ -394,12 +179,11 @@ mount_pids() {
 # is what it read. Nothing here writes anything and nothing here leaves the
 # machine.
 
-# Every orchestrator process running out of this application directory - the
-# extracted copy when the app was an AppImage, or the install directory when it
-# is patched in place. The path is the tree's own, so `--app` is matched too.
+# Every orchestrator process running out of this bundle. The path is the app's
+# own, so a bundle patched with --app is matched too.
 orchestrator_pids() {
   command -v pgrep >/dev/null 2>&1 || return 1
-  want="$1/resources/orchestrator/orchestrator.js"
+  want="$1/Contents/Resources/orchestrator/orchestrator.js"
   for pid in $(pgrep -f "$want" 2>/dev/null); do
     # `pgrep -f` matches any command line that merely *mentions* the path - a
     # `tail -f` on it, an editor, a shell whose arguments name it. Only the
@@ -411,6 +195,120 @@ orchestrator_pids() {
       *"$want") printf '%s\n' "$pid" ;;
     esac
   done
+}
+
+# ---------------------------------------------------------------- relaunching
+#
+# A patch on disk is not a patch in effect, and 1.6 answered that with an
+# instruction - "quit it completely and reopen it" - which was the one step
+# people skipped. 1.7 does it: ask the app to quit, then SIGTERM, then SIGKILL,
+# then start it again and watch for the process that proves it read the file.
+# That order is macOS's own, not an invention; nothing here needs sudo.
+
+quit_app() {
+  app="$1"
+  [ -n "$(orchestrator_pids "$app")" ] || return 0
+
+  if command -v osascript >/dev/null 2>&1; then
+    osascript -e 'tell application "Freebuff" to quit' >/dev/null 2>&1 || true
+  fi
+
+  # Five seconds to honour a quit request is generous for an app that is idle,
+  # and short enough that a stuck one does not hold the terminal for long.
+  waited=0
+  while [ -n "$(orchestrator_pids "$app")" ] && [ "$waited" -lt 5 ]; do
+    sleep 1; waited=$(( waited + 1 ))
+  done
+
+  for sig in TERM KILL; do
+    pids="$(orchestrator_pids "$app")"
+    [ -n "$pids" ] || return 0
+    for pid in $pids; do kill -"$sig" "$pid" 2>/dev/null || true; done
+    waited=0
+    while [ -n "$(orchestrator_pids "$app")" ] && [ "$waited" -lt 5 ]; do
+      sleep 1; waited=$(( waited + 1 ))
+    done
+  done
+
+  [ -z "$(orchestrator_pids "$app")" ]
+}
+
+launch_app() {
+  command -v open >/dev/null 2>&1 || return 1
+  open -a "$1" >/dev/null 2>&1
+}
+
+# 0 when the app is running again, 1 when it could not be brought back. Says
+# nothing on success: the caller owns the wording, and `verify` owns the proof.
+restart_app() {
+  app="$1"
+  quit_app "$app" || return 1
+  launch_app "$app" || return 1
+  return 0
+}
+
+# A process that started before the patch was written is still running the old
+# bytes. Both seconds come from ps, so the same two-second tolerance `verify`
+# uses applies here; without it a just-launched app reads as stale.
+stale_process() {
+  app="$1"; target="$2"
+  mtime="$(file_mtime "$target")" || return 1
+  for pid in $(orchestrator_pids "$app"); do
+    started="$(proc_start_epoch "$pid")" || continue
+    [ "$started" -lt "$(( mtime - 2 ))" ] && return 0
+  done
+  return 1
+}
+
+# ------------------------------------------------------------- focus sessions
+#
+# A session is a timestamp in a file, nothing more. No timer process, no daemon,
+# no network: `status` reads it, `install` ignores it, and the ads coming back is
+# `unfocus`. That is the whole mechanism, and it is deliberately the whole
+# mechanism - a background job that could revert a patch is a background job that
+# could revert one at the wrong time.
+
+duration_seconds() {
+  raw="${1:-25m}"
+  case "$raw" in
+    *m) n="${raw%m}" ;;
+    *h)
+      n="${raw%h}"
+      case "$n" in ''|*[!0-9]*) return 1 ;; esac
+      n=$(( n * 60 )) ;;
+    *[!0-9]*) return 1 ;;
+    *) n="$raw" ;;
+  esac
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$n" -gt 0 ] || return 1
+  [ "$n" -le 1440 ] || return 1
+  printf '%s' "$(( n * 60 ))"
+}
+
+clock_at() {
+  if [ "$(uname -s)" = "Darwin" ]; then
+    date -r "$1" '+%H:%M' 2>/dev/null || printf '?'
+  else
+    date -d "@$1" '+%H:%M' 2>/dev/null || printf '?'
+  fi
+}
+
+session_ends() {
+  [ -f "$SESSION_DIR/session" ] || return 1
+  sed -n 's/^endsAt=//p' "$SESSION_DIR/session" 2>/dev/null | head -n 1
+}
+
+# One line in status: whether a focus session is on, and when it lifts. Silent
+# when there is no session at all, because most runs have nothing to say.
+session_line() {
+  ends="$(session_ends)" || return 0
+  case "$ends" in ''|*[!0-9]*) return 0 ;; esac
+  now="$(date +%s)"
+  if [ "$now" -lt "$ends" ]; then
+    say "  focus    on until $(clock_at "$ends") ($(( (ends - now + 59) / 60 )) min left)"
+  else
+    say "  focus    session ended at $(clock_at "$ends") - run: sh freebuff-focus.sh unfocus"
+  fi
 }
 
 # When that process started, as an epoch second. Elapsed time is the only thing
@@ -872,38 +770,36 @@ writable() {
 
 permission_help() {
   hr
-  say "${B}That directory is not writable by you.${OFF}"
+  say "${B}macOS is blocking writes into the app bundle.${OFF}"
   say ""
-  say "  If Freebuff is installed system-wide (under /opt or /usr), the whole"
-  say "  install belongs to root and only root can patch it. Two ways forward:"
+  say "  System Settings -> Privacy & Security -> App Management"
+  say "  switch ON the app you are running this from (Terminal, iTerm, VS Code…),"
+  say "  then ${B}quit and reopen that app${OFF} and run this again."
   say ""
-  say "    ${B}1.${OFF} Extract the AppImage instead - the recommended path. Point"
-  say "       --app at the .AppImage you downloaded and everything happens in"
-  say "       ${WORK_DIR}, which you own. No password, nothing system-wide touched."
-  say ""
-  say "    ${B}2.${OFF} Re-run this exact command with ${B}sudo${OFF} if you really mean to"
-  say "       patch the system copy. This tool never escalates by itself and"
-  say "       never asks for a password."
+  say "  This is macOS's own guard on app bundles. The tool never asks for a"
+  say "  password and never uses sudo."
   hr
 }
 
 # ------------------------------------------------------------------ commands
 
 cmd_version() {
-  say "freebuff-adblock-desktop-linux $VERSION"
+  say "freebuff-focus-desktop $VERSION"
   say "$ORIGIN"
 }
 
 cmd_help() {
-  say "${B}Freebuff AdBlock for Desktop (Linux)${OFF} $VERSION"
+  say "${B}Freebuff Focus for Desktop${OFF} $VERSION"
   say "Blocks the ads Freebuff Desktop renders from its bundled orchestrator."
   say ""
   say "${B}usage${OFF}"
-  say "  sh freebuff-adblock-linux.sh [command] [options]"
+  say "  sh freebuff-focus.sh [command] [options]"
   say ""
   say "${B}commands${OFF}"
-  say "  install   patch the app (default; backs up first)"
-  say "  status    report what is applied - changes nothing"
+  say "  install   patch the app (default; backs up first, then restarts it)"
+  say "  focus     install, then keep a session for a while (default 25m)"
+  say "  unfocus   end the session: restore the pristine backup"
+  say "  status    report what is applied, and any session - changes nothing"
   say "  verify    wait for Freebuff to be relaunched, then check what it loaded"
   say "  scan      show every anchor this build has - changes nothing"
   say "  revert    restore the pristine backup"
@@ -911,28 +807,30 @@ cmd_help() {
   say "  version   print the tool version"
   say ""
   say "${B}options${OFF}"
-  say "  --app PATH         the Freebuff .AppImage, or a directory to patch in place"
-  say "  --work-dir PATH    where the extracted copy is kept"
+  say "  --app PATH         the Freebuff.app to patch (default: /Applications)"
   say "  --display-only     skip the ad-API anchor (leave the render gate only)"
   say "  --dry-run          report only, write nothing"
   say "  --backup-dir PATH  where the pristine copy lives"
+  say "  --resign           ad-hoc re-sign the bundle after patching"
+  say "  --no-restart       leave the app alone; you quit and reopen it"
+  say "  --restart          quit and relaunch even if the app was closed"
+  say "  --session-dir PATH where a focus session is recorded"
   say "  --no-wait          verify: report now instead of waiting for the relaunch"
   say "  --timeout SECONDS  how long verify waits (default 300)"
   say ""
-  say "${B}The AppImage rule.${OFF} Freebuff ships as one executable holding a"
-  say "read-only filesystem, so there is no file inside it to patch and this tool"
-  say "never writes to your download. It extracts the image with the runtime the"
-  say "image carries, patches that copy under ${B}$WORK_DIR${OFF}, and tells you how"
-  say "to run it. Point --app at an ordinary directory instead - an AppDir you"
-  say "extracted, or a system install - and it patches in place."
+  say "A focus session is a timestamp on disk, not a process. It is 25m, 90m, 2h"
+  say "or a plain number of minutes, and it does nothing on its own: ${B}unfocus${OFF}"
+  say "restores the ads, and a session that runs out leaves the patch in place"
+  say "until you do."
   say ""
   say "A patch on disk is not the same as a patch in effect: the orchestrator is"
   say "read once at launch. ${B}verify${OFF} waits for the relaunch and reports the"
   say "two times that decide it - when the patch was written and when the process"
-  say "running now started. Ctrl-C stops the wait; nothing it does writes to the app."
+  say "running now started. ${B}install${OFF} does that for you whenever Freebuff is"
+  say "open. Ctrl-C stops the wait; nothing it does writes to the app."
   say ""
-  say "After any Freebuff update, run ${B}install${OFF} again against the new image -"
-  say "an update is a new AppImage, and the patched copy is left behind by it."
+  say "After any Freebuff update, run ${B}install${OFF} again - an update replaces"
+  say "the whole Resources folder and the patch goes with it."
   say ""
   say "Each anchor has a literal form and a relaxed one. The relaxed form is only"
   say "used when it is found the expected number of times ${B}and${OFF} ad code sits"
@@ -941,12 +839,17 @@ cmd_help() {
 }
 
 cmd_status() {
-  PREP=ephemeral
-  prep
-  target="$APP_TREE/resources/orchestrator/orchestrator.js"
-  version="$APP_VERSION"
-  say "${B}Freebuff Ad Block${OFF} - desktop tool $VERSION"
-  show_app
+  app="$(find_app)" || die "Freebuff Desktop was not found in /Applications or ~/Applications.
+  Pass --app /path/to/Freebuff.app if it lives somewhere else."
+  target="$app/Contents/Resources/orchestrator/orchestrator.js"
+  [ -f "$target" ] || die "no orchestrator.js in $app - is that the Freebuff app?"
+
+  version="$(app_version "$app")"
+  say "${B}Freebuff Focus${OFF} - desktop tool $VERSION"
+  say "  app      $app"
+  say "  version  $version"
+  say "  target   $target"
+  session_line
   say ""
 
   report="$(engine check "$target" "$DEEP")"
@@ -956,10 +859,10 @@ cmd_status() {
     if all_applied "$report"; then
       say ""
       say "  ${GREEN}Ads are off.${OFF} Quit Freebuff and reopen it, then check what it loaded:"
-      say "    sh freebuff-adblock-linux.sh verify"
+      say "    sh freebuff-focus.sh verify"
     else
       say ""
-      say "  ${YELLOW}Not patched yet.${OFF} Run: sh freebuff-adblock-linux.sh install"
+      say "  ${YELLOW}Not patched yet.${OFF} Run: sh freebuff-focus.sh install"
     fi
     return 0
   fi
@@ -969,11 +872,11 @@ cmd_status() {
   say "  Either it was already modified by another tool, or this Freebuff version"
   say "  changed the file. Nothing was written."
   say ""
-  say "  See what this build actually has:  sh freebuff-adblock-linux.sh scan"
+  say "  See what this build actually has:  sh freebuff-focus.sh scan"
   say ""
   if [ -f "$BACKUP_DIR/orchestrator.js.$version.orig" ]; then
     say "  A pristine backup exists. Restore it, then install again:"
-    say "    sh freebuff-adblock-linux.sh revert && sh freebuff-adblock-linux.sh install"
+    say "    sh freebuff-focus.sh revert && sh freebuff-focus.sh install"
   else
     say "  If you patched this by hand before, restore the original file first."
   fi
@@ -981,12 +884,16 @@ cmd_status() {
 }
 
 cmd_install() {
-  prep
-  target="$APP_TREE/resources/orchestrator/orchestrator.js"
-  version="$APP_VERSION"
+  app="$(find_app)" || die "Freebuff Desktop was not found in /Applications or ~/Applications.
+  Pass --app /path/to/Freebuff.app if it lives somewhere else."
+  target="$app/Contents/Resources/orchestrator/orchestrator.js"
+  [ -f "$target" ] || die "no orchestrator.js in $app - is that the Freebuff app?"
 
-  say "${B}Freebuff Ad Block${OFF} - desktop tool $VERSION"
-  show_app
+  version="$(app_version "$app")"
+
+  say "${B}Freebuff Focus${OFF} - desktop tool $VERSION"
+  say "  app      $app"
+  say "  version  $version"
   say ""
 
   report="$(engine check "$target" "$DEEP")" || true
@@ -999,22 +906,34 @@ cmd_install() {
     say "  Freebuff version changed the ad code."
     say ""
     say "  See what this build actually has:"
-    say "    sh freebuff-adblock-linux.sh scan                        (a local copy)"
-    say "    curl -fsSL $ORIGIN/downloads/freebuff-adblock-desktop-linux.sh | sh -s scan"
+    say "    sh freebuff-focus.sh scan                        (a local copy)"
+    say "    curl -fsSL $ORIGIN/downloads/freebuff-focus-desktop.sh | sh -s scan"
     say "  Read-only either way. The piped one is for when you ran this through"
     say "  curl and have no local copy of the script to point at."
     say ""
     if [ -f "$BACKUP_DIR/orchestrator.js.$version.orig" ]; then
       say "  A pristine backup is on disk:"
-      say "    sh freebuff-adblock-linux.sh revert && sh freebuff-adblock-linux.sh install"
-      say "    curl -fsSL $ORIGIN/downloads/freebuff-adblock-desktop-linux.sh | sh -s revert"
+      say "    sh freebuff-focus.sh revert && sh freebuff-focus.sh install"
+      say "    curl -fsSL $ORIGIN/downloads/freebuff-focus-desktop.sh | sh -s revert"
     fi
     return 1
   fi
 
   if all_applied "$report"; then
     say "  ${GREEN}Already patched.${OFF} Nothing to do."
-    say "  Quit Freebuff and reopen it if ads are still showing."
+    # Nothing to write, but there can still be a process reading the old bytes.
+    # That is the only useful thing left to do here, so it is the only thing done.
+    if [ "$RESTART" != "never" ] && stale_process "$app" "$target"; then
+      say "  A process that started before the patch is still running it."
+      if restart_app "$app"; then
+        say "  restarted Freebuff"
+        [ "$WAIT" = "1" ] && { verify_running "$app" "$target" || true; }
+      else
+        warn "could not restart Freebuff - quit it yourself and open it again"
+      fi
+    else
+      say "  Quit Freebuff and reopen it if ads are still showing."
+    fi
     return 0
   fi
 
@@ -1072,52 +991,60 @@ cmd_install() {
   render_report "$after"
   say ""
 
-  # No re-sign step, and none is needed: an AppImage's signature, where it has
-  # one, is an embedded `.sha256`/GPG signature over the whole image. This tool
-  # never writes to the image, and the extracted copy beside it is plain files.
+  if [ "$RESIGN" = "1" ] && command -v codesign >/dev/null 2>&1; then
+    if codesign --force --deep --sign - "$app" 2>/dev/null; then
+      ok "re-signed the bundle ad-hoc"
+    else
+      warn "re-sign failed - Freebuff may refuse to launch; run: codesign --force --deep --sign - '$app'"
+    fi
+  fi
+
   ok "patched Freebuff $version"
   hr
-  if [ "$APP_KIND" = "image" ]; then
-    # Nothing to wait for here. The patched copy is not the file the user
-    # double-clicked, and no relaunch of the original can ever load it - so this
-    # is the one honest ending: say exactly what to start instead.
-    say "${B}Start the patched copy, not the original image:${OFF}"
-    say "  '$APP_TREE/AppRun'"
-    say ""
-    say "  ${B}$APP_PATH${OFF} was not modified at all. Keep it as your fallback:"
-    say "  it is the unpatched app, and running it still shows ads."
-    if [ -n "$(mount_pids)" ]; then
-      say ""
-      warn "Freebuff is running from the image right now - quit that first, or you"
-      say "             will have two copies of it open."
-    fi
-    say ""
-    say "  Then check what it loaded:  sh freebuff-adblock-linux.sh verify"
-  elif orchestrator_running "$APP_TREE"; then
-    say "${B}Freebuff is running. Quit it completely and start it again.${OFF}"
-    say "The orchestrator is read once at launch, so the patch only takes effect"
-    say "on the next start - focusing the window is not enough."
-    say ""
-    # Only when there is a relaunch to wait for. A closed app has nothing to
-    # observe, and an unattended install must not sit here for five minutes.
-    if [ "$WAIT" = "1" ]; then
-      verify_running "$APP_TREE" "$target" || true
+
+  running="$(orchestrator_pids "$app")"
+  if [ "$RESTART" = "never" ]; then
+    if [ -n "$running" ]; then
+      say "${B}Freebuff is running. Quit it completely (Cmd-Q) and reopen it.${OFF}"
+      say "The orchestrator is read once at launch, so the patch only takes effect"
+      say "on the next start - focusing the window is not enough."
+      say "  Then check what it loaded:  sh freebuff-focus.sh verify"
     else
-      say "  Then check what it loaded:  sh freebuff-adblock-linux.sh verify"
+      say "${B}Open Freebuff.${OFF} The patch takes effect on the next launch."
+      say "  Then check what it loaded:  sh freebuff-focus.sh verify"
+    fi
+  elif [ -n "$running" ] || [ "$RESTART" = "always" ]; then
+    say "${B}Restarting Freebuff so the patch takes effect.${OFF}"
+    say "The orchestrator is read once at launch, so a running app has to be"
+    say "restarted - focusing the window is not enough."
+    say ""
+    if restart_app "$app"; then
+      say "  restarted Freebuff"
+      # Only when there is a relaunch to wait for. A closed app has nothing to
+      # observe, and an unattended install must not sit here for five minutes.
+      if [ "$WAIT" = "1" ]; then
+        verify_running "$app" "$target" || true
+      else
+        say "  Then check what it loaded:  sh freebuff-focus.sh verify"
+      fi
+    else
+      warn "could not restart Freebuff - quit it completely (Cmd-Q), reopen it, then:"
+      say "    sh freebuff-focus.sh verify"
     fi
   else
-    say "${B}Start Freebuff.${OFF} The patch takes effect on the next start."
-    say "  Then check what it loaded:  sh freebuff-adblock-linux.sh verify"
+    say "${B}Open Freebuff.${OFF} The patch takes effect on the next launch."
+    say "  Then check what it loaded:  sh freebuff-focus.sh verify"
   fi
   say ""
-  say "Undo any time:  sh freebuff-adblock-linux.sh revert"
-  say "After a Freebuff update, re-run:  sh freebuff-adblock-linux.sh install"
+  say "Undo any time:    sh freebuff-focus.sh unfocus"
+  say "Back to ads only: sh freebuff-focus.sh revert"
+  say "After a Freebuff update, re-run:  sh freebuff-focus.sh install"
 }
 
 cmd_revert() {
-  prep
-  target="$APP_TREE/resources/orchestrator/orchestrator.js"
-  version="$APP_VERSION"
+  app="$(find_app)" || die "Freebuff Desktop was not found. Pass --app /path/to/Freebuff.app"
+  target="$app/Contents/Resources/orchestrator/orchestrator.js"
+  version="$(app_version "$app")"
   backup="$BACKUP_DIR/orchestrator.js.$version.orig"
 
   if [ ! -f "$backup" ]; then
@@ -1142,96 +1069,75 @@ cmd_revert() {
   fi
 
   ok "restored $target from $backup"
-  say "  Start Freebuff again to bring the ads back."
+
+  if [ "$RESTART" = "never" ]; then
+    say "  Quit Freebuff and reopen it to bring the ads back."
+    return 0
+  fi
+
+  if [ -n "$(orchestrator_pids "$app")" ]; then
+    if restart_app "$app"; then
+      say "  restarted Freebuff - the ads are back on the next launch."
+    else
+      warn "could not restart Freebuff - quit it completely (Cmd-Q) and reopen it"
+    fi
+  else
+    say "  Freebuff is not running. The ads come back the next time you start it."
+  fi
 }
 
 cmd_doctor() {
-  distro="unknown"
-  if [ -r /etc/os-release ]; then
-    distro="$(sed -n 's/^PRETTY_NAME="\{0,1\}\(.*\)"\{0,1\}$/\1/p' /etc/os-release 2>/dev/null | head -n 1)"
-    [ -n "$distro" ] || distro=unknown
-  fi
-
-  say "${B}freebuff-adblock-desktop-linux $VERSION${OFF}"
+  say "${B}freebuff-focus-desktop $VERSION${OFF}"
   say "  origin        $ORIGIN"
   say "  os            $(uname -s) $(uname -r)"
-  say "  distro        $distro"
   say "  shell         ${SHELL:-unknown}"
   say "  perl          $(command -v perl || echo 'MISSING')"
-  say "  pgrep / ps    $(command -v pgrep >/dev/null 2>&1 && echo pgrep || echo 'pgrep MISSING') / $(command -v ps >/dev/null 2>&1 && echo ps || echo 'ps MISSING')"
-  say "  work dir      $WORK_DIR"
+  say "  codesign      $(command -v codesign || echo '(none)')"
   say "  backup dir    $BACKUP_DIR"
-  say ""
+  say "  session dir   $SESSION_DIR"
 
-  kind=""; path=""; tree=""; dest=""
-  if res="$(resolve_app)"; then
-    kind="$(printf '%s\n' "$res" | sed -n 1p)"
-    path="$(printf '%s\n' "$res" | sed -n 2p)"
-  fi
-
-  if [ -z "$kind" ]; then
-    bad "no Freebuff AppImage or AppDir was found"
-    say "  looked in     $(app_search_paths | tr '\n' ' ')"
-    say "  Pass --app if it lives somewhere else."
-  elif [ "$kind" = "image" ]; then
-    say "  image         $path"
-    say "  image version $(image_version "$path")"
-    dest="$(work_dir_for_image "$path")"
-    if is_tree "$dest/squashfs-root"; then
-      tree="$dest/squashfs-root"
-      say "  extracted     $tree"
-      say "  copy version  $(tree_version "$tree")"
-    else
-      say "  extracted     (nothing yet - install extracts it)"
-      say "  would use     $dest/squashfs-root"
-    fi
-  else
-    tree="$path"
-    say "  app           $path"
-    say "  app version   $(tree_version "$path")"
-    say "  ${DIM}(an AppDir or an install directory - patched in place)${OFF}"
-  fi
-  say ""
-
-  if [ -n "$tree" ]; then
-    target="$tree/resources/orchestrator/orchestrator.js"
+  if app="$(find_app)"; then
+    target="$app/Contents/Resources/orchestrator/orchestrator.js"
+    say "  app           $app"
+    say "  version       $(app_version "$app")"
     say "  orchestrator  $target"
     if [ -f "$target" ]; then
       say "  size          $(wc -c < "$target" | tr -d ' ') bytes"
-      if writable "$target"; then
-        ok "this copy is writable"
-      else
-        bad "this copy is NOT writable (a system install needs sudo, or use the AppImage)"
-      fi
+      writable "$target" && ok "bundle is writable" || bad "bundle is NOT writable (App Management)"
       report="$(engine check "$target" "$DEEP")" || true
       render_report "$report"
     else
-      bad "orchestrator.js is missing from that directory"
+      bad "orchestrator.js is missing"
     fi
-  fi
-  say ""
-
-  mounted="$(mount_pids)"
-  if [ -n "$mounted" ]; then
-    warn "Freebuff is running from an AppImage mount (pid $(printf '%s' "$mounted" | tr '\n' ' '))"
-  elif [ -n "$tree" ] && orchestrator_running "$tree"; then
-    warn "Freebuff is running from this copy"
   else
-    ok "nothing is running from a copy this tool knows about"
+    bad "Freebuff Desktop was not found"
   fi
+
+  session_line
+
+  if app_running; then warn "Freebuff is running"; else ok "Freebuff is not running"; fi
+
+  # One exit status on every platform, so a wrapper can use this as its preflight
+  # check. 1.6 exited 1 on Windows and 0 everywhere else for the same finding,
+  # which meant the answer depended on the operating system rather than the app.
+  exit 0
 }
 
 # Read-only. Prints every candidate site this build contains, so a Freebuff
 # release that moved an anchor is a report to read rather than a dead end.
 # Nothing inside the bundle is opened for writing.
 cmd_scan() {
-  PREP=ephemeral
-  prep
-  target="$APP_TREE/resources/orchestrator/orchestrator.js"
-  version="$APP_VERSION"
+  app="$(find_app)" || die "Freebuff Desktop was not found in /Applications or ~/Applications.
+  Pass --app /path/to/Freebuff.app if it lives somewhere else."
+  target="$app/Contents/Resources/orchestrator/orchestrator.js"
+  [ -f "$target" ] || die "no orchestrator.js in $app - is that the Freebuff app?"
 
-  say "${B}Freebuff Ad Block${OFF} - anchor scan (tool $VERSION)"
-  show_app
+  version="$(app_version "$app")"
+
+  say "${B}Freebuff Focus${OFF} - anchor scan (tool $VERSION)"
+  say "  app      $app"
+  say "  version  $version"
+  say "  target   $target"
   say ""
 
   report="$(engine scan "$target" "$DEEP")" || die "the scan could not read $target"
@@ -1254,11 +1160,16 @@ cmd_scan() {
 # the patch was written is reading it - and that is the whole test. Waiting is
 # the price, because the answer only becomes true after a relaunch.
 cmd_verify() {
-  prep
-  target="$APP_TREE/resources/orchestrator/orchestrator.js"
-  version="$APP_VERSION"
-  say "${B}Freebuff Ad Block${OFF} - desktop tool $VERSION"
-  show_app
+  app="$(find_app)" || die "Freebuff Desktop was not found in /Applications or ~/Applications.
+  Pass --app /path/to/Freebuff.app if it lives somewhere else."
+  target="$app/Contents/Resources/orchestrator/orchestrator.js"
+  [ -f "$target" ] || die "no orchestrator.js in $app - is that the Freebuff app?"
+
+  version="$(app_version "$app")"
+  say "${B}Freebuff Focus${OFF} - desktop tool $VERSION"
+  say "  app      $app"
+  say "  version  $version"
+  say "  target   $target"
   say ""
 
   report="$(engine check "$target" "$DEEP")" || true
@@ -1269,25 +1180,20 @@ cmd_verify() {
     bad "This orchestrator.js does not match what the tool expects."
     say "  There is nothing of this tool's to verify, and nothing was written."
     say ""
-    say "  See what this build actually has:  sh freebuff-adblock-linux.sh scan"
+    say "  See what this build actually has:  sh freebuff-focus.sh scan"
     return 1
   fi
 
   if ! all_applied "$report"; then
     render_report "$report"
     say ""
-    say "  ${YELLOW}Not patched yet.${OFF} Run: sh freebuff-adblock-linux.sh install"
+    say "  ${YELLOW}Not patched yet.${OFF} Run: sh freebuff-focus.sh install"
     return 1
   fi
 
   render_report "$report"
   say ""
-  # A relaunch means something different on the two paths. Patching in place
-  # means the app the user already has will read the new file when it starts
-  # again. An extracted copy is a second app, so the wait can only be satisfied
-  # by starting that one - and the report has to name it.
-  if [ "$APP_KIND" = "image" ]; then LAUNCH_CMD="$APP_TREE/AppRun"; else LAUNCH_CMD=""; fi
-  verify_running "$APP_TREE" "$target"
+  verify_running "$app" "$target"
 }
 
 # The two times, and the wait between them. Returns 0 only when the process
@@ -1337,12 +1243,7 @@ verify_running() {
     # Why not, said once, so a long wait does not repeat itself.
     if [ "$announced" = "0" ]; then
       if [ -z "$pid" ]; then
-        if [ -n "${LAUNCH_CMD:-}" ]; then
-          say "  running    nothing is running from the patched copy"
-          say "             start it with:  $LAUNCH_CMD"
-        else
-          say "  running    Freebuff is not open."
-        fi
+        say "  running    Freebuff is not open."
       elif [ -z "$mtime" ]; then
         say "  running    pid $pid, started $(proc_started_at "$pid")"
         say "             the patch time could not be read, so the two cannot be compared"
@@ -1355,30 +1256,24 @@ verify_running() {
 
     if [ "$WAIT" = "0" ]; then
       say ""
-      say "  ${YELLOW}Not verified.${OFF} This check needs something running the patched"
-      say "  file. Quit Freebuff completely, start it again, then run this again:"
-      if [ -n "${LAUNCH_CMD:-}" ]; then say "    '$LAUNCH_CMD'"; fi
-      say "    sh freebuff-adblock-linux.sh verify"
+      say "  ${YELLOW}Not verified.${OFF} This check needs Freebuff running the patched"
+      say "  file. Quit it completely (Cmd-Q), reopen it, then run it again:"
+      say "    sh freebuff-focus.sh verify"
       trap - INT
       return 1
     fi
 
     if [ "$waiting" = "0" ]; then
       say ""
-      if [ -n "${LAUNCH_CMD:-}" ]; then
-        say "  Waiting for '$LAUNCH_CMD' to be started…  ${DIM}(Ctrl-C to stop)${OFF}"
-      else
-        say "  Waiting for Freebuff to be quit and started again…  ${DIM}(Ctrl-C to stop)${OFF}"
-      fi
+      say "  Waiting for Freebuff to be quit and reopened…  ${DIM}(Ctrl-C to stop)${OFF}"
       waiting=1
     fi
 
     if [ "$interrupted" = "1" ] || [ "$remaining" -le 0 ]; then
       say ""
       say "  ${YELLOW}Stopped waiting.${OFF} The patch itself is fine - this check only"
-      say "  needs the relaunch. Run it again once Freebuff is running:"
-      if [ -n "${LAUNCH_CMD:-}" ]; then say "    '$LAUNCH_CMD'"; fi
-      say "    sh freebuff-adblock-linux.sh verify"
+      say "  needs the relaunch. Run it again once Freebuff is open:"
+      say "    sh freebuff-focus.sh verify"
       trap - INT
       return 1
     fi
@@ -1390,8 +1285,45 @@ verify_running() {
 
 # ------------------------------------------------------------------------ run
 
+# install, and then record a session. The patch is the thing that hides ads; the
+# session only says how long the reader meant it to last, so a failed install is
+# a failed focus and nothing is written.
+cmd_focus() {
+  secs="$(duration_seconds "$FOCUS_ARG")" || die "focus needs a duration like 25m, 90m, 2h or 45 (minutes)"
+
+  cmd_install || return 1
+
+  mkdir -p "$SESSION_DIR" 2>/dev/null || die "cannot create $SESSION_DIR"
+  ends=$(( $(date +%s) + secs ))
+  if ! printf 'endsAt=%s\nduration=%sm\n' "$ends" "$(( secs / 60 ))" > "$SESSION_DIR/session" 2>/dev/null; then
+    die "cannot write $SESSION_DIR/session"
+  fi
+
+  say ""
+  say "${B}Focus until $(clock_at "$ends").${OFF} Ads come back when you end it:"
+  say "    sh freebuff-focus.sh unfocus"
+  say "There is no timer process. A session that runs out leaves the patch where"
+  say "it is until you run that, which is stated here rather than pretended away."
+}
+
+# End the session and put the original file back. The session file goes even
+# when there was nothing to restore, so a stale timestamp cannot outlive the
+# patch it describes.
+cmd_unfocus() {
+  status=0
+  cmd_revert || status=$?
+  if [ -d "$SESSION_DIR" ]; then
+    rm -f "$SESSION_DIR/session" 2>/dev/null || true
+  fi
+  [ "$status" -eq 0 ] || return "$status"
+  say "  session  cleared"
+  return 0
+}
+
 case "$COMMAND" in
   install) cmd_install ;;
+  focus)   cmd_focus ;;
+  unfocus) cmd_unfocus ;;
   status)  cmd_status ;;
   verify)  cmd_verify ;;
   revert)  cmd_revert ;;

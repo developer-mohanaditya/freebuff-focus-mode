@@ -1,7 +1,7 @@
 /**
  * Build pipeline.
  *
- *   extension/  ->  site/downloads/freebuff-adblock-<version>.zip
+ *   extension/  ->  site/downloads/freebuff-focus-<version>.zip
  *               ->  site/update.xml
  *   site/       ->  dist/   (static output the preview and hosting serve)
  *
@@ -31,7 +31,7 @@ const DOWNLOADS_DIR = path.join(SITE_DIR, 'downloads');
  */
 const SITE_ORIGIN = process.env.SITE_ORIGIN || 'https://freebuff-focus-mode.vercel.app';
 
-const ZIP_ROOT_FOLDER = 'freebuff-adblock';
+const ZIP_ROOT_FOLDER = 'freebuff-focus';
 
 /** Chrome rejects this feed until the real ID and a signed CRX exist. */
 const PLACEHOLDER_APP_ID = 'YOUR_EXTENSION_ID_HERE';
@@ -129,7 +129,7 @@ function packageAll(version, manifest) {
     });
 
     const zip = createZip(entries);
-    const fileName = `freebuff-adblock-${version}${suffix}.zip`;
+    const fileName = `freebuff-focus-${version}${suffix}.zip`;
     fs.writeFileSync(path.join(DOWNLOADS_DIR, fileName), zip);
 
     return {
@@ -149,7 +149,7 @@ function packageAll(version, manifest) {
   // current variant is kept - none is a leftover of another. The pattern is
   // deliberately narrow: the desktop tool's packages live in the same folder
   // and are cleaned by buildDesktop(), not here.
-  const EXTENSION_PACKAGE = /^freebuff-adblock-[\d.]+(-store|-firefox)?\.zip$/;
+  const EXTENSION_PACKAGE = /^freebuff-focus-[\d.]+(-store|-firefox)?\.zip$/;
   const keep = new Set([unpacked.fileName, store.fileName, firefox.fileName]);
   for (const existing of fs.readdirSync(DOWNLOADS_DIR)) {
     if (EXTENSION_PACKAGE.test(existing) && !keep.has(existing)) {
@@ -166,7 +166,7 @@ function packageAll(version, manifest) {
 function writeUpdateXml(version, packageInfo) {
   const xml = `<?xml version='1.0' encoding='UTF-8'?>
 <!--
-  Chromium update manifest for Freebuff Ad Block.
+  Chromium update manifest for Freebuff Focus.
 
   BEFORE THIS FEED GOES LIVE:
     1. Replace ${PLACEHOLDER_APP_ID} with the real 32-character extension ID
@@ -211,23 +211,23 @@ function writeDist(version, packageInfo, storeInfo, firefoxInfo, desktop) {
   const stamp = (source) =>
     source
       .replace(
-        /href="downloads\/freebuff-adblock-[\d.]+\.zip"/g,
+        /href="downloads\/freebuff-focus-[\d.]+\.zip"/g,
         `href="${packageInfo.relativePath}"`
       )
       .replace(
-        /href="downloads\/freebuff-adblock-[\d.]+-firefox\.zip"/g,
+        /href="downloads\/freebuff-focus-[\d.]+-firefox\.zip"/g,
         `href="${firefoxInfo.relativePath}"`
       )
       .replace(
-        /href="downloads\/freebuff-adblock-desktop-[\d.]+\.zip"/g,
+        /href="downloads\/freebuff-focus-desktop-[\d.]+\.zip"/g,
         `href="${desktop.archive.relativePath}"`
       )
       .replace(
-        /href="downloads\/freebuff-adblock-desktop-[\d.]+-windows\.zip"/g,
+        /href="downloads\/freebuff-focus-desktop-[\d.]+-windows\.zip"/g,
         `href="${desktop.windowsArchive.relativePath}"`
       )
       .replace(
-        /href="downloads\/freebuff-adblock-desktop-[\d.]+-linux\.zip"/g,
+        /href="downloads\/freebuff-focus-desktop-[\d.]+-linux\.zip"/g,
         `href="${desktop.linuxArchive.relativePath}"`
       )
       .replace(/(<span data-version>)[^<]*(<\/span>)/g, `$1${version}$2`)

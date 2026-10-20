@@ -1,4 +1,8 @@
-# Project context — Freebuff Ad Block
+# Project context — Freebuff Focus Mode
+
+> **Historical snapshot (1.6 era).** File names, commands and links below predate
+> the 1.7.0 rename. `README.md` describes the shipped tool; this file is kept for
+> the reasoning behind it.
 
 Drop this file into any chat about this project and the chat can give you
 accurate, up-to-date answers about work that was actually done here, without

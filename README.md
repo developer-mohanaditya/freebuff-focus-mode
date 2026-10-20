@@ -35,8 +35,8 @@ has its own local tools. See the For Desktop section on the install page.
 ```sh
 # macOS / Linux
 curl -fsSL https://freebuff-focus-mode.vercel.app/downloads/freebuff-focus-desktop.sh | sh
-sh freebuff-focus.sh install   # quiet for the work block
-sh freebuff-focus.sh revert    # bring ads back after
+sh freebuff-focus.sh focus 25m   # quiet for the work block
+sh freebuff-focus.sh unfocus     # bring ads back after
 ```
 
 ```powershell
@@ -44,8 +44,10 @@ sh freebuff-focus.sh revert    # bring ads back after
 irm https://freebuff-focus-mode.vercel.app/downloads/freebuff-focus-desktop.ps1 | iex
 ```
 
-Quit and reopen Freebuff after either command. Every Freebuff update replaces the patched
-files, so run install again after an update.
+The tool restarts Freebuff itself, then checks that the running process read the patched
+file. Every Freebuff update replaces the patched files, so run it again after an update.
+A session is the patch plus an end time: `status` prints when it lifts, and nothing runs in
+the background - `unfocus` is what puts the ads back.
 
 ## How it works
 

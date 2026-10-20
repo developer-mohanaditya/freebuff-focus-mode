@@ -1,4 +1,4 @@
-Freebuff AdBlock for Desktop - Linux
+Freebuff Focus for Desktop - Linux
 ====================================
 
 Tool version __FBD_VERSION__. Blocks the ads Freebuff Desktop renders from the
@@ -7,7 +7,7 @@ orchestrator process it ships inside its own application directory.
 WHAT IS IN THIS ZIP
 -------------------
 
-  freebuff-adblock-linux.sh   the tool
+  freebuff-focus-linux.sh   the tool
   INSTALL-linux.txt           this file
 
 Nothing else, and nothing to install first. It is a POSIX shell script that uses
@@ -27,8 +27,9 @@ So it does the next best thing, which works out better in practice:
   1. it extracts the image using the runtime the image itself carries (no FUSE,
      no squashfs-tools, no root, nothing to install),
   2. it patches the extracted copy, which lives in
-       ~/.local/share/freebuff-adblock/freebuff-<version>/
-  3. and it tells you to start that copy instead of the original image.
+       ~/.local/share/freebuff-focus/freebuff-<version>/
+  3. and it stops the image and starts that copy for you - or prints its AppRun
+     path when there was nothing running to replace.
 
 Your .AppImage is left exactly as it was - same bytes, same signature. Keep it as
 the unpatched fallback: running it still shows ads, which is how you check the
@@ -42,19 +43,34 @@ like the macOS tool.
 RUN IT
 ------
 
-  sh freebuff-adblock-linux.sh
+  sh freebuff-focus-linux.sh
 
 That is `install`: it reports what it found, writes a pristine backup, patches,
-and prints how to start the patched copy. Afterwards:
+and starts the patched copy (or prints its AppRun path, if Freebuff was closed).
+Afterwards:
 
-  ~/.local/share/freebuff-adblock/freebuff-0.0.164/squashfs-root/AppRun
+  ~/.local/share/freebuff-focus/freebuff-0.0.164/squashfs-root/AppRun
 
 If it could not find your AppImage, pass it yourself:
 
-  sh freebuff-adblock-linux.sh install --app ~/Applications/Freebuff-0.0.164-linux-x86_64.AppImage
+  sh freebuff-focus-linux.sh install --app ~/Applications/Freebuff-0.0.164-linux-x86_64.AppImage
 
 It looks in ~/Applications, ~/Downloads, ~/.local/bin, ~/bin, ~/Desktop, /opt,
 /usr/local/bin and the current directory, for a file named *Freebuff*.AppImage.
+
+
+FOCUS SESSIONS
+--------------
+
+A session is the patch plus an end time:
+
+  sh freebuff-focus-linux.sh focus 25m    install, and remember that you meant 25m
+  sh freebuff-focus-linux.sh status       shows "focus on until 14:20" while it lasts
+  sh freebuff-focus-linux.sh unfocus      restore the original, and clear the session
+
+25m is the default; 90m, 2h and a plain number of minutes all parse. There is no
+timer process: the timestamp is a file, status reads it, and a session that runs
+out leaves the patch where it is until you run unfocus.
 
 
 AFTER YOU RUN IT
@@ -66,7 +82,7 @@ AFTER YOU RUN IT
 
 2. Check what it loaded:
 
-     sh freebuff-adblock-linux.sh verify
+     sh freebuff-focus-linux.sh verify
 
    That waits for something to be running the patched file and then compares two
    times - when the patch was written, and when the running process started.
@@ -79,14 +95,14 @@ AFTER YOU RUN IT
 OTHER COMMANDS
 --------------
 
-  sh freebuff-adblock-linux.sh status    report what is applied - changes nothing
-  sh freebuff-adblock-linux.sh scan      list every anchor this build has - changes nothing
-  sh freebuff-adblock-linux.sh revert    restore the pristine backup
-  sh freebuff-adblock-linux.sh doctor    environment report, for a bug report
+  sh freebuff-focus-linux.sh status    report what is applied - changes nothing
+  sh freebuff-focus-linux.sh scan      list every anchor this build has - changes nothing
+  sh freebuff-focus-linux.sh revert    restore the pristine backup
+  sh freebuff-focus-linux.sh doctor    environment report, for a bug report
 
 `status` and `scan` extract a temporary copy and remove it when they finish, so
 they never leave anything behind. `install`, `revert` and `verify` use the copy
-under ~/.local/share/freebuff-adblock, which is the one they can agree on.
+under ~/.local/share/freebuff-focus, which is the one they can agree on.
 
 
 WHAT IT DOES, AND WHAT IT DOES NOT
@@ -116,7 +132,7 @@ never needs it.
 
 Get the original back:
 
-  sh freebuff-adblock-linux.sh revert
+  sh freebuff-focus-linux.sh revert
 
 Full source, issues and the macOS and Windows tools:
   __FBD_ORIGIN__

@@ -3,6 +3,20 @@
   "outputDirectory": "dist",
   "cleanUrls": true,
   "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/downloads/freebuff-adblock-desktop.sh",
+      "destination": "/downloads/freebuff-focus-desktop.sh"
+    },
+    {
+      "source": "/downloads/freebuff-adblock-desktop.ps1",
+      "destination": "/downloads/freebuff-focus-desktop.ps1"
+    },
+    {
+      "source": "/downloads/freebuff-adblock-desktop-linux.sh",
+      "destination": "/downloads/freebuff-focus-desktop-linux.sh"
+    }
+  ],
   "headers": [
     {
       "source": "/downloads/(.*)",

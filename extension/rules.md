@@ -5,6 +5,21 @@ unknown properties are allowed inside it** — a single stray key makes Chrome
 reject the entire ruleset and silently disable network blocking. The
 explanations live here instead.
 
+## It is off by default, on purpose
+
+The ruleset ships with `"enabled": false` in the manifest, because Focus Mode
+is opt-in: a fresh install must see the site exactly as freebuff.com served it.
+`background.js` is what turns it on and off, via
+`declarativeNetRequest.updateEnabledRulesets`, and it follows the same
+`freebuffFocusEnabled` setting the popup toggle and `content.js` use. Three
+places call it: install, browser start, and a change to that setting. Install
+and start are not redundant — a Chrome update resets static rulesets to the
+manifest default, which would silently leave a focusing user unprotected.
+
+Consequence worth knowing: a request cancelled while focusing stays cancelled
+until the page is loaded again. Turning focus off restores the page instantly
+through `content.js`, and the popup says to reload for the network half.
+
 ## Structure
 
 | Rule id | Priority | Action | Purpose |
@@ -38,7 +53,7 @@ product's own progress feed. Don't.
 `initiatorDomains: ["freebuff.com"]` means "only when freebuff.com is the page
 that started the request". A block rule with no initiator scope would follow you
 to every site in the browser, turning a site-scoped tool into a general-purpose
-ad blocker — which is explicitly out of scope.
+blocker — which is explicitly out of scope.
 
 ## Why path rules are slash-anchored
 

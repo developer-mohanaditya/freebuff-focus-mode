@@ -1,13 +1,13 @@
 #Requires -Version 5.1
 <#
-Freebuff AdBlock for Desktop - Windows
+Freebuff Focus for Desktop - Windows
 
 Freebuff Desktop renders ads from the orchestrator process it ships inside its own
 install folder - `resources\orchestrator\orchestrator.js`, run by the bundled
 runtime, not from `app.asar`. A browser extension can never reach it, which is
 why this exists as a separate, local tool.
 
-This is the Windows half of the macOS tool in `freebuff-adblock.sh`. The anchors,
+This is the Windows half of the macOS tool in `freebuff-focus.sh`. The anchors,
 the counts, the markers and the safety rules are the same; only the machinery
 around them differs (path discovery, process lookup, the write, and the message a
 blocked write gets). It disables the ad runtime in place:
@@ -30,17 +30,17 @@ blocked write gets). It disables the ad runtime in place:
 Usage, from a PowerShell prompt (PowerShell ships with every Windows, so there
 is nothing to install first):
 
-  irm __FBD_ORIGIN__/downloads/freebuff-adblock-desktop.ps1 | iex           # install (the default)
-  $s = irm __FBD_ORIGIN__/downloads/freebuff-adblock-desktop.ps1
+  irm __FBD_ORIGIN__/downloads/freebuff-focus-desktop.ps1 | iex           # install (the default)
+  $s = irm __FBD_ORIGIN__/downloads/freebuff-focus-desktop.ps1
   & ([scriptblock]::Create($s)) status                                      # any other command
 
-  powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 scan       # a local copy
+  powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 scan       # a local copy
 
 The piped form never writes the script to disk, so it carries no
 mark-of-the-web and the execution policy never applies to it: `iex` runs a
 string, not a .ps1 file. Downloading it by hand does attach the mark, which is
 why the documented local form passes -ExecutionPolicy Bypass, and why
-`Unblock-File .\freebuff-adblock.ps1` works just as well.
+`Unblock-File .\freebuff-focus.ps1` works just as well.
 
 Commands:
   install   patch the app (default; backs up first)
@@ -90,13 +90,34 @@ $Command = ''
 $App = ''
 if ($env:FREEBUFF_APP) { $App = $env:FREEBUFF_APP }
 
+# The backup folder keeps its 1.6 name on purpose: renaming it would orphan every
+# pristine copy an existing install already wrote, and those are what revert
+# restores. The override is new; the old one still works.
 $BackupDir = Join-Path $HOME 'freebuff-patch-backups'
-if ($env:FREEBUFF_ADBLOCK_BACKUP_DIR) { $BackupDir = $env:FREEBUFF_ADBLOCK_BACKUP_DIR }
+if ($env:FREEBUFF_FOCUS_BACKUP_DIR) { $BackupDir = $env:FREEBUFF_FOCUS_BACKUP_DIR }
+
+# Where a focus session is recorded. One small file, no daemon: the session ends
+# when its timestamp passes, whether or not this tool is ever run again.
+$SessionDir = Join-Path $HOME '.local\share\freebuff-focus'
+if ($env:LOCALAPPDATA) { $SessionDir = Join-Path $env:LOCALAPPDATA 'freebuff-focus' }
+if ($env:FREEBUFF_FOCUS_SESSION_DIR) { $SessionDir = $env:FREEBUFF_FOCUS_SESSION_DIR }
 
 $Deep = $true
 $Dry = $false
 $Wait = $true
 $WaitSecs = 300
+
+# auto   - restart only when Freebuff was open when the patch was written
+# always - quit and relaunch even when it was closed (-Restart)
+# never  - never touch a process (-NoRestart)
+$Restart = 'auto'
+$FocusArg = ''
+
+# Set by focus/unfocus before they hand over to install/revert, which are the
+# functions that already own the exit paths. A flag is honest here: the session
+# is written only when the patch it describes actually succeeded.
+$script:FocusSeconds = $null
+$script:EndFocus = $false
 
 $script:IsWindowsOS = ($env:OS -eq 'Windows_NT')
 $script:UseColor = $false
@@ -172,7 +193,7 @@ while ($index -lt $Arguments.Count) {
 
   # The value either came glued on (`-App=C:\x`) or is the next argument.
   $value = $inline
-  if ($value -eq $null -and @('app', 'backupdir', 'timeout') -contains $key) {
+  if ($value -eq $null -and @('app', 'backupdir', 'timeout', 'sessiondir') -contains $key) {
     if ($index -lt $Arguments.Count) {
       $value = $Arguments[$index]
       $index++
@@ -181,6 +202,8 @@ while ($index -lt $Arguments.Count) {
 
   switch ($key) {
     'install' { $Command = 'install' }
+    'focus' { $Command = 'focus' }
+    'unfocus' { $Command = 'unfocus' }
     'status' { $Command = 'status' }
     'verify' { $Command = 'verify' }
     'revert' { $Command = 'revert' }
@@ -201,11 +224,25 @@ while ($index -lt $Arguments.Count) {
       if ("$value" -notmatch '^\d+$') { Die "-Timeout needs a number of seconds, not '$value'" }
       $WaitSecs = [int]$value
     }
+    'sessiondir' {
+      if ([string]::IsNullOrWhiteSpace($value)) { Die '-SessionDir needs a path' }
+      $SessionDir = $value
+    }
     'displayonly' { $Deep = $false }
     'deep' { $Deep = $true }
     'dryrun' { $Dry = $true }
+    'restart' { $Restart = 'always' }
+    'norestart' { $Restart = 'never' }
     'nowait' { $Wait = $false }
-    default { Die "unknown argument: $raw  (try help)" }
+    default {
+      # `focus 25m` - the duration is the one positional argument this tool takes,
+      # and only focus takes it.
+      if ($Command -eq 'focus' -and [string]::IsNullOrEmpty($FocusArg) -and $raw -notmatch '^-') {
+        $FocusArg = $raw
+      } else {
+        Die "unknown argument: $raw  (try help)"
+      }
+    }
   }
 }
 
@@ -465,6 +502,165 @@ function ConvertTo-StartTime {
 function Get-PatchTime {
   param([string] $Target)
   try { return [DateTimeOffset](Get-Item -LiteralPath $Target).LastWriteTime } catch { return $null }
+}
+
+# ---------------------------------------------------------------- relaunching
+#
+# A patch on disk is not a patch in effect, and 1.6 answered that with an
+# instruction - "quit it completely and reopen it" - which was the one step
+# people skipped. 1.7 does it: close the window politely, then force it, then
+# start the app again and watch for the process that proves it read the file.
+# Nothing here needs elevation.
+
+function Stop-App {
+  param([string] $AppDir, [string] $Target)
+
+  $running = @(Get-OrchestratorProcesses -AppDir $AppDir -Target $Target)
+  if ($running.Count -eq 0) { return $true }
+
+  foreach ($entry in $running) {
+    try { (Get-Process -Id $entry.Id -ErrorAction Stop).CloseMainWindow() | Out-Null } catch { }
+  }
+
+  $deadline = (Get-Date).AddSeconds(10)
+  while ((Get-Date) -lt $deadline) {
+    if (@(Get-OrchestratorProcesses -AppDir $AppDir -Target $Target).Count -eq 0) { return $true }
+    Start-Sleep -Milliseconds 500
+  }
+
+  foreach ($entry in @(Get-OrchestratorProcesses -AppDir $AppDir -Target $Target)) {
+    try { Stop-Process -Id $entry.Id -Force -ErrorAction Stop } catch { }
+  }
+  Start-Sleep -Seconds 1
+  return (@(Get-OrchestratorProcesses -AppDir $AppDir -Target $Target).Count -eq 0)
+}
+
+function Start-App {
+  param([string] $AppDir)
+
+  $exe = Join-Path $AppDir 'Freebuff.exe'
+  if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+    $exe = $null
+    $found = @(Get-ChildItem -LiteralPath $AppDir -Filter 'Freebuff.exe' -File -Recurse -ErrorAction SilentlyContinue |
+      Select-Object -First 1)
+    if ($found.Count -gt 0) { $exe = $found[0].FullName }
+  }
+  if (-not $exe) { return $false }
+
+  try { Start-Process -FilePath $exe -ErrorAction Stop | Out-Null } catch { return $false }
+  return $true
+}
+
+function Restart-App {
+  param([string] $AppDir, [string] $Target)
+  if (-not (Stop-App -AppDir $AppDir -Target $Target)) { return $false }
+  return (Start-App -AppDir $AppDir)
+}
+
+# A process that started before the patch was written is still running the old
+# bytes. Both times come from the OS at one-second resolution, so the same
+# two-second tolerance Wait-ForRelaunch uses applies here.
+function Test-StalePatch {
+  param([string] $AppDir, [string] $Target)
+
+  $patchTime = Get-PatchTime -Target $Target
+  if (-not $patchTime) { return $false }
+
+  foreach ($entry in @(Get-OrchestratorProcesses -AppDir $AppDir -Target $Target)) {
+    if (-not $entry.Start) { continue }
+    if ($entry.Start.UtcDateTime -lt $patchTime.UtcDateTime.AddSeconds(-2)) { return $true }
+  }
+  return $false
+}
+
+# ------------------------------------------------------------- focus sessions
+#
+# A session is a timestamp in a file, nothing more. No timer process, no daemon,
+# no network: status reads it, install ignores it, and the ads coming back is
+# unfocus. That is the whole mechanism, and it is deliberately the whole
+# mechanism - a background job that could revert a patch is a background job that
+# could revert one at the wrong time.
+
+function ConvertTo-FocusSeconds {
+  param([string] $Value)
+
+  $raw = '25m'
+  if (-not [string]::IsNullOrWhiteSpace($Value)) { $raw = $Value.Trim().ToLowerInvariant() }
+
+  $minutes = 0
+  if ($raw -match '^(\d+)m$') { $minutes = [int]$Matches[1] }
+  elseif ($raw -match '^(\d+)h$') { $minutes = [int]$Matches[1] * 60 }
+  elseif ($raw -match '^\d+$') { $minutes = [int]$raw }
+  else { return $null }
+
+  if ($minutes -lt 1 -or $minutes -gt 1440) { return $null }
+  return $minutes * 60
+}
+
+function Get-SessionPath {
+  return (Join-Path $SessionDir 'session')
+}
+
+function Get-SessionEnds {
+  $path = Get-SessionPath
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+
+  $line = @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue |
+    Where-Object { $_ -match '^endsAt=' } | Select-Object -First 1)
+  if ($line.Count -eq 0) { return $null }
+
+  $text = ("$($line[0])" -replace '^endsAt=', '').Trim()
+  if ($text -notmatch '^\d+$') { return $null }
+
+  try { return [DateTimeOffset]::FromUnixTimeSeconds([int64]$text) } catch { return $null }
+}
+
+function Complete-Focus {
+  if (-not $script:FocusSeconds) { return }
+
+  try {
+    if (-not (Test-Path -LiteralPath $SessionDir -PathType Container)) {
+      New-Item -ItemType Directory -Path $SessionDir -Force | Out-Null
+    }
+    $ends = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $script:FocusSeconds
+    $minutes = [int]($script:FocusSeconds / 60)
+    [System.IO.File]::WriteAllText(
+      (Get-SessionPath),
+      "endsAt=$ends`nduration=${minutes}m`n",
+      (New-Object System.Text.UTF8Encoding($false))
+    )
+  } catch {
+    Die "cannot write $(Get-SessionPath): $($_.Exception.Message)"
+  }
+
+  $clock = [DateTimeOffset]::FromUnixTimeSeconds($ends).ToLocalTime().ToString('HH:mm')
+  Say ''
+  Say "Focus until $clock. Ads come back when you end it:"
+  Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 unfocus'
+  Say 'There is no timer process. A session that runs out leaves the patch where'
+  Say 'it is until you run that, which is stated here rather than pretended away.'
+}
+
+function Complete-Unfocus {
+  if (-not $script:EndFocus) { return }
+  $path = Get-SessionPath
+  if (Test-Path -LiteralPath $path -PathType Leaf) {
+    try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop } catch { }
+  }
+  Say '  session  cleared'
+}
+
+function Show-SessionLine {
+  $ends = Get-SessionEnds
+  if (-not $ends) { return }
+
+  $clock = $ends.ToLocalTime().ToString('HH:mm')
+  if ($ends -gt [DateTimeOffset]::Now) {
+    $left = [int][Math]::Ceiling(($ends - [DateTimeOffset]::Now).TotalMinutes)
+    Say "  focus    on until $clock ($left min left)"
+  } else {
+    Say "  focus    session ended at $clock - run: freebuff-focus.ps1 unfocus"
+  }
 }
 
 function Get-SpanWords {
@@ -1054,8 +1250,8 @@ function Show-WriteHelp {
 
 function Get-ScanHint {
   Write-Host '  See what this build actually has:'
-  Write-Host '    powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 scan'
-  Write-Host "    `$s = irm $Origin/downloads/freebuff-adblock-desktop.ps1; & ([scriptblock]::Create(`$s)) scan"
+  Write-Host '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 scan'
+  Write-Host "    `$s = irm $Origin/downloads/freebuff-focus-desktop.ps1; & ([scriptblock]::Create(`$s)) scan"
   Write-Host '  Read-only either way. The piped one is for when you ran the one-liner and'
   Write-Host '  have no local copy to point at.'
 }
@@ -1063,22 +1259,24 @@ function Get-ScanHint {
 # ------------------------------------------------------------------- commands
 
 function Show-Version {
-  Say "freebuff-adblock-desktop $Version"
+  Say "freebuff-focus-desktop $Version"
   Say $Origin
 }
 
 function Show-Help {
-  Say "Freebuff AdBlock for Desktop (Windows) $Version"
+  Say "Freebuff Focus for Desktop (Windows) $Version"
   Say 'Blocks the ads Freebuff Desktop renders from its bundled orchestrator.'
   Say ''
   Say 'usage'
-  Say "  irm $Origin/downloads/freebuff-adblock-desktop.ps1 | iex"
-  Say "  `$s = irm $Origin/downloads/freebuff-adblock-desktop.ps1"
+  Say "  irm $Origin/downloads/freebuff-focus-desktop.ps1 | iex"
+  Say "  `$s = irm $Origin/downloads/freebuff-focus-desktop.ps1"
   Say '  & ([scriptblock]::Create($s)) [command] [options]'
   Say ''
   Say 'commands'
-  Say '  install   patch the app (default; backs up first)'
-  Say '  status    report what is applied - changes nothing'
+  Say '  install   patch the app (default; backs up first, then restarts it)'
+  Say '  focus     install, then keep a session for a while (default 25m)'
+  Say '  unfocus   end the session: restore the pristine backup'
+  Say '  status    report what is applied, and any session - changes nothing'
   Say '  verify    wait for Freebuff to be relaunched, then check what it loaded'
   Say '  scan      show every anchor this build has - changes nothing'
   Say '  revert    restore the pristine backup'
@@ -1090,8 +1288,16 @@ function Show-Help {
   Say '  -BackupDir PATH    where the pristine copy lives'
   Say '  -DisplayOnly       skip the ad-API anchor (leave the render gate only)'
   Say '  -DryRun            report only, write nothing'
+  Say '  -NoRestart         leave the app alone; you quit and reopen it'
+  Say '  -Restart           quit and relaunch even if the app was closed'
+  Say '  -SessionDir PATH   where a focus session is recorded'
   Say '  -NoWait            verify: report now instead of waiting for the relaunch'
   Say '  -Timeout SECONDS   how long verify waits (default 300)'
+  Say ''
+  Say 'A focus session is a timestamp on disk, not a process. It is 25m, 90m, 2h'
+  Say 'or a plain number of minutes, and it does nothing on its own: unfocus'
+  Say 'restores the ads, and a session that runs out leaves the patch in place'
+  Say 'until you do.'
   Say ''
   Say 'A patch on disk is not the same as a patch in effect: the orchestrator is'
   Say 'read once at launch. verify waits for the relaunch and reports the two times'
@@ -1131,12 +1337,13 @@ function Invoke-Status {
   $target = Get-RequiredTarget $appDir
   $appVersion = Get-AppVersion $appDir
 
-  Say "Freebuff Ad Block - desktop tool $Version"
+  Say "Freebuff Focus - desktop tool $Version"
   Say "  app      $appDir"
   Say "  version  $appVersion"
   Say "  target   $target"
   Say ''
 
+  Show-SessionLine
   $result = Invoke-Engine -Mode check -Target $target -DeepScan $Deep
   Show-Report $result
 
@@ -1144,10 +1351,10 @@ function Invoke-Status {
     if (Test-AllApplied $result) {
       Say ''
       Say '  Ads are off. Quit Freebuff and reopen it, then check what it loaded:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 verify'
+      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
     } else {
       Say ''
-      Say '  Not patched yet. Run: powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 install'
+      Say '  Not patched yet. Run: powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 install'
     }
     exit 0
   }
@@ -1158,12 +1365,12 @@ function Invoke-Status {
   Say '  changed the file. Nothing was written.'
   Say ''
   Say '  See what this build actually has:'
-  Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 scan'
+  Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 scan'
   Say ''
   $backup = Join-Path $BackupDir "orchestrator.js.$appVersion.orig"
   if (Test-Path -LiteralPath $backup -PathType Leaf) {
     Say '  A pristine backup exists. Restore it, then install again:'
-    Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 revert'
+    Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 revert'
   } else {
     Say '  If you patched this by hand before, restore the original file first.'
   }
@@ -1175,7 +1382,7 @@ function Invoke-Install {
   $target = Get-RequiredTarget $appDir
   $appVersion = Get-AppVersion $appDir
 
-  Say "Freebuff Ad Block - desktop tool $Version"
+  Say "Freebuff Focus - desktop tool $Version"
   Say "  app      $appDir"
   Say "  version  $appVersion"
   Say ''
@@ -1194,14 +1401,27 @@ function Invoke-Install {
     $backup = Join-Path $BackupDir "orchestrator.js.$appVersion.orig"
     if (Test-Path -LiteralPath $backup -PathType Leaf) {
       Say '  A pristine backup is on disk:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 revert'
+      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 revert'
     }
     exit 1
   }
 
   if (Test-AllApplied $result) {
     Say '  Already patched. Nothing to do.'
-    Say '  Quit Freebuff and reopen it if ads are still showing.'
+    # Nothing to write, but there can still be a process reading the old bytes.
+    # That is the only useful thing left to do here, so it is the only thing done.
+    if ($Restart -ne 'never' -and (Test-StalePatch -AppDir $appDir -Target $target)) {
+      Say '  A process that started before the patch is still running it.'
+      if (Restart-App -AppDir $appDir -Target $target) {
+        Say '  restarted Freebuff'
+        if ($Wait) { Wait-ForRelaunch -AppDir $appDir -Target $target | Out-Null }
+      } else {
+        Warn 'could not restart Freebuff - quit it yourself and open it again'
+      }
+    } else {
+      Say '  Quit Freebuff and reopen it if ads are still showing.'
+    }
+    Complete-Focus
     exit 0
   }
 
@@ -1286,30 +1506,53 @@ function Invoke-Install {
 
   $running = @(Get-OrchestratorProcesses -AppDir $appDir -Target $target).Count -gt 0
 
-  if ($running) {
-    Write-Piece 'Freebuff is running. Quit it completely and reopen it.' 'White'
-    Write-Host ''
-    Say 'The orchestrator is read once at launch, so the patch only takes effect on'
-    Say 'the next start - focusing the window is not enough.'
-    Say ''
-    # Only when there is a relaunch to wait for. A closed app has nothing to
-    # observe, and an unattended install must not sit here for five minutes.
-    if ($Wait) {
-      Wait-ForRelaunch -AppDir $appDir -Target $target | Out-Null
-    } else {
+  if ($Restart -eq 'never') {
+    if ($running) {
+      Write-Piece 'Freebuff is running. Quit it completely and reopen it.' 'White'
+      Write-Host ''
+      Say 'The orchestrator is read once at launch, so the patch only takes effect on'
+      Say 'the next start - focusing the window is not enough.'
       Say '  Then check what it loaded:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 verify'
+      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+    } else {
+      Write-Piece 'Open Freebuff.' 'White'
+      Write-Host ''
+      Say 'The patch takes effect on the next launch.'
+      Say '  Then check what it loaded:'
+      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+    }
+  } elseif ($running -or $Restart -eq 'always') {
+    Write-Piece 'Restarting Freebuff so the patch takes effect.' 'White'
+    Write-Host ''
+    Say 'The orchestrator is read once at launch, so a running app has to be'
+    Say 'restarted - focusing the window is not enough.'
+    Say ''
+    if (Restart-App -AppDir $appDir -Target $target) {
+      Say '  restarted Freebuff'
+      # Only when there is a relaunch to wait for. A closed app has nothing to
+      # observe, and an unattended install must not sit here for five minutes.
+      if ($Wait) {
+        Wait-ForRelaunch -AppDir $appDir -Target $target | Out-Null
+      } else {
+        Say '  Then check what it loaded:'
+        Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+      }
+    } else {
+      Warn 'could not restart Freebuff - quit it completely, reopen it, then:'
+      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
     }
   } else {
     Write-Piece 'Open Freebuff.' 'White'
     Write-Host ''
     Say 'The patch takes effect on the next launch.'
     Say '  Then check what it loaded:'
-    Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 verify'
+    Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
   }
   Say ''
-  Say 'Undo any time:  powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 revert'
+  Say 'Undo any time:    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 unfocus'
+  Say 'Back to ads only: powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 revert'
   Say 'After a Freebuff update, re-run install.'
+  Complete-Focus
   exit 0
 }
 
@@ -1343,17 +1586,33 @@ function Invoke-Revert {
   }
 
   Ok "restored $target from $backup"
-  Say '  Quit Freebuff and reopen it to bring the ads back.'
+
+  if ($Restart -eq 'never') {
+    Say '  Quit Freebuff and reopen it to bring the ads back.'
+    exit 0
+  }
+
+  if (@(Get-OrchestratorProcesses -AppDir $appDir -Target $target).Count -gt 0) {
+    if (Restart-App -AppDir $appDir -Target $target) {
+      Say '  restarted Freebuff - the ads are back on the next launch.'
+    } else {
+      Warn 'could not restart Freebuff - quit it completely and reopen it'
+    }
+  } else {
+    Say '  Freebuff is not running. The ads come back the next time you start it.'
+  }
+  Complete-Unfocus
   exit 0
 }
 
 function Invoke-Doctor {
-  Say "freebuff-adblock-desktop $Version"
+  Say "freebuff-focus-desktop $Version"
   Say "  origin        $Origin"
   Say "  os            $([System.Environment]::OSVersion.VersionString)"
   Say "  powershell    $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
   Say "  windows       $($script:IsWindowsOS)"
   Say "  backup dir    $BackupDir"
+  Say "  session dir   $SessionDir"
   Say ''
 
   $candidates = Get-AppCandidates
@@ -1374,7 +1633,11 @@ function Invoke-Doctor {
   $appDir = Find-AppDir
   if (-not $appDir) {
     Bad 'Freebuff Desktop was not found'
-    exit 1
+    Say '  That is the whole report: there is no app to inspect.'
+    # One exit status on every platform, so a wrapper can use this as its
+    # preflight check. 1.6 exited 1 here and 0 on macOS/Linux for the same
+    # finding, which made the answer depend on the OS rather than the app.
+    exit 0
   }
 
   $target = Get-TargetPath $appDir
@@ -1394,6 +1657,8 @@ function Invoke-Doctor {
   }
 
   $processes = Get-OrchestratorProcesses -AppDir $appDir -Target $target
+  Show-SessionLine
+
   if ($processes.Count -gt 0) {
     Warn "Freebuff is running ($($processes.Count) matching process(es))"
   } else {
@@ -1407,7 +1672,7 @@ function Invoke-Scan {
   $target = Get-RequiredTarget $appDir
   $appVersion = Get-AppVersion $appDir
 
-  Say "Freebuff Ad Block - anchor scan (tool $Version)"
+  Say "Freebuff Focus - anchor scan (tool $Version)"
   Say "  app      $appDir"
   Say "  version  $appVersion"
   Say "  target   $target"
@@ -1447,7 +1712,7 @@ function Invoke-Verify {
   $target = Get-RequiredTarget $appDir
   $appVersion = Get-AppVersion $appDir
 
-  Say "Freebuff Ad Block - desktop tool $Version"
+  Say "Freebuff Focus - desktop tool $Version"
   Say "  app      $appDir"
   Say "  version  $appVersion"
   Say "  target   $target"
@@ -1462,7 +1727,7 @@ function Invoke-Verify {
     Say "  There is nothing of this tool's to verify, and nothing was written."
     Say ''
     Say '  See what this build actually has:'
-    Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 scan'
+    Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 scan'
     exit 1
   }
 
@@ -1470,7 +1735,7 @@ function Invoke-Verify {
     Show-Report $result
     Say ''
     Say '  Not patched yet. Run:'
-    Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 install'
+    Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 install'
     exit 1
   }
 
@@ -1567,7 +1832,7 @@ function Wait-ForRelaunch {
       Say ''
       Say '  Not verified. This check needs Freebuff running the patched file.'
       Say '  Quit it completely, reopen it, then run it again:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 verify'
+      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
       return 1
     }
 
@@ -1583,7 +1848,7 @@ function Wait-ForRelaunch {
       Say ''
       Say '  Stopped waiting. The patch itself is fine - this check only needs the'
       Say '  relaunch. Run it again once Freebuff is open:'
-      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-adblock.ps1 verify'
+      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
       return 1
     }
 
@@ -1594,8 +1859,22 @@ function Wait-ForRelaunch {
 
 # ------------------------------------------------------------------------ run
 
+function Invoke-Focus {
+  $seconds = ConvertTo-FocusSeconds $FocusArg
+  if (-not $seconds) { Die 'focus needs a duration like 25m, 90m, 2h or 45 (minutes)' }
+  $script:FocusSeconds = $seconds
+  Invoke-Install
+}
+
+function Invoke-Unfocus {
+  $script:EndFocus = $true
+  Invoke-Revert
+}
+
 switch ($Command) {
   'install' { Invoke-Install }
+  'focus' { Invoke-Focus }
+  'unfocus' { Invoke-Unfocus }
   'status' { Invoke-Status }
   'verify' { Invoke-Verify }
   'revert' { Invoke-Revert }
