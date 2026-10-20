@@ -86,6 +86,10 @@ if ($null -eq $Arguments) { $Arguments = @() }
 $Version = '1.7.0'
 $Origin = 'https://freebuff-focus-mode.vercel.app'
 
+# Whether this run has the script on disk. `irm ... | iex` does not, so a hint
+# that says `.\freebuff-focus.ps1 status` would point at a file that is not there.
+$HaveLocal = [bool]$PSCommandPath
+
 $Command = ''
 $App = ''
 if ($env:FREEBUFF_APP) { $App = $env:FREEBUFF_APP }
@@ -956,6 +960,28 @@ function Show-Report {
   foreach ($row in $Result.Rows) { Format-PatchRow $row }
 }
 
+# Everything this tool can do, at the one moment a reader cares: right after an
+# install that found nothing to write. Printed by install only - `status` stays a
+# report and `help` stays the long form.
+function Show-NextSteps {
+  Write-Piece '  What this tool can do' 'White'
+  Write-Host ''
+  Say '  status        what is applied, and any session - changes nothing'
+  Say '  focus 25m     start a session: 25m, 90m, 2h, or plain minutes'
+  Say '  unfocus       end the session and bring the ads back'
+  Say '  verify        wait for a relaunch, then check what it loaded'
+  Say '  scan          every anchor this build contains - read-only'
+  Say '  revert        restore the pristine backup'
+  Say '  doctor        environment report'
+  Say '  help          every command and option'
+  Say ''
+  Say '  Run them as:  powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 <command>'
+  if (-not $HaveLocal) {
+    Say '  No local copy (this run came through irm | iex)? Save one first:'
+    Say "    irm $Origin/downloads/freebuff-focus-desktop.ps1 -OutFile freebuff-focus.ps1"
+  }
+}
+
 function Test-AllApplied {
   param($Result)
   if ($Result.Verdict -ne 'ok') { return $false }
@@ -1407,20 +1433,50 @@ function Invoke-Install {
   }
 
   if (Test-AllApplied $result) {
-    Say '  Already patched. Nothing to do.'
+    # Nothing to write, so this run is worth only what it reports: which anchors
+    # are already in place, whether a session is running, whether the process
+    # you are looking at is reading the patched bytes, and what else the tool
+    # can do from here. "Nothing to do" alone answered none of that.
+    Write-Piece '  Already patched.' 'Green'
+    Say ' Every anchor in this build is already replaced.'
+    Show-Report $result
+    Show-SessionLine
+    if (-not (Get-SessionEnds)) {
+      Say '  session  none - ads stay off until you revert'
+    }
+    Say ''
+
     # Nothing to write, but there can still be a process reading the old bytes.
-    # That is the only useful thing left to do here, so it is the only thing done.
-    if ($Restart -ne 'never' -and (Test-StalePatch -AppDir $appDir -Target $target)) {
-      Say '  A process that started before the patch is still running it.'
-      if (Restart-App -AppDir $appDir -Target $target) {
-        Say '  restarted Freebuff'
-        if ($Wait) { Wait-ForRelaunch -AppDir $appDir -Target $target | Out-Null }
+    $running = @(Get-OrchestratorProcesses -AppDir $appDir -Target $target).Count -gt 0
+    if (-not $running) {
+      Write-Piece '  Next: open Freebuff.' 'White'
+      Say ' The orchestrator is read once at launch, so the patch takes effect'
+      Say '  on the next start.'
+      Say '  Then check what it loaded:'
+      Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
+    } elseif (Test-StalePatch -AppDir $appDir -Target $target) {
+      if ($Restart -eq 'never') {
+        Write-Piece '  Freebuff is running the bytes from before the patch.' 'White'
+        Say ''
+        Say '  Quit it completely and reopen it - focusing the window is not enough.'
+        Say '  Then check what it loaded:'
+        Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
       } else {
-        Warn 'could not restart Freebuff - quit it yourself and open it again'
+        Say '  A process that started before the patch is still running it.'
+        if (Restart-App -AppDir $appDir -Target $target) {
+          Say '  restarted Freebuff'
+          if ($Wait) { Wait-ForRelaunch -AppDir $appDir -Target $target | Out-Null }
+        } else {
+          Warn 'could not restart Freebuff - quit it yourself and open it again'
+        }
       }
     } else {
-      Say '  Quit Freebuff and reopen it if ads are still showing.'
+      Write-Piece '  Freebuff is running the patched file.' 'White'
+      Say ' Ads are off in that window.'
     }
+
+    Say ''
+    Show-NextSteps
     Complete-Focus
     exit 0
   }
@@ -1549,9 +1605,11 @@ function Invoke-Install {
     Say '    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 verify'
   }
   Say ''
-  Say 'Undo any time:    powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 unfocus'
+  Say 'Undo any time: unfocus ends a session.'
   Say 'Back to ads only: powershell -ExecutionPolicy Bypass -File .\freebuff-focus.ps1 revert'
-  Say 'After a Freebuff update, re-run install.'
+  Say 'After a Freebuff update, run install again.'
+  Say ''
+  Show-NextSteps
   Complete-Focus
   exit 0
 }
