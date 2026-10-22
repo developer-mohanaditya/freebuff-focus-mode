@@ -1,12 +1,16 @@
 # Freebuff Focus Mode
 
+<p align="center">
+  <img src="site/store-assets/marquee-1400x560.png" alt="Freebuff Focus Mode" width="100%" />
+</p>
+
 **Focus when you need it. Support when you do not.**
 
 A focus companion for [freebuff.com](https://freebuff.com). Flip focus on before a deep
 work block and it quiets ad requests plus the slots that appear mid-build. Flip it off when
 you are done, and everything returns, so free models stay free.
 
-Unofficial community project. Not affiliated with Freebuff or Codebuff.
+Unofficial community project. Not affiliated with Freebuff.
 
 [Install it](https://freebuff-focusmode.vercel.app/) ·
 [Privacy policy](https://freebuff-focusmode.vercel.app/privacy) ·
