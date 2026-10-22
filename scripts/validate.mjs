@@ -91,7 +91,7 @@ function checkManifest() {
   if (/^\d+(\.\d+){0,3}$/.test(String(manifest.version))) pass(`version ${manifest.version}`);
   else fail(`version "${manifest.version}" is not a valid extension version`);
 
-  for (const key of ['declarativeNetRequest', 'storage']) {
+  for (const key of ['alarms', 'declarativeNetRequest', 'storage']) {
     (manifest.permissions || []).includes(key)
       ? pass(`permission "${key}" declared`)
       : fail(`missing required permission "${key}"`);
@@ -277,6 +277,8 @@ function checkPopup() {
     'pick',
     'customCount',
     'clearCustom',
+    'chips',
+    'timerNote',
   ]) {
     html.includes(`id="${id}"`)
       ? pass(`popup has #${id}`)
@@ -547,6 +549,54 @@ function checkPickerWiring() {
       : fail(`content.js no longer defines ${needle} - hand-picked rules would break`);
   }
 }
+
+/* -------------------------------------------------------------- timed focus */
+
+/**
+ * The deadline key lives in three files. The popup writes it, the content
+ * script never reads it, and the worker is the only thing that clears it - so
+ * a rename in one file leaves a session that runs forever with a countdown in
+ * the popup that reaches zero and stays there. Compare the names, and compare
+ * that the worker can actually wake itself up to end one.
+ */
+function checkTimerWiring() {
+  console.log('\ntimed focus');
+
+  const read = (file) => fs.readFileSync(path.join(EXT, file), 'utf8');
+  const declaration = (source, name) => {
+    const line = source.split('\n').find((text) => text.includes(`const ${name} =`));
+    if (!line) return null;
+    const open = line.indexOf("'");
+    const close = line.lastIndexOf("'");
+    return open >= 0 && close > open ? line.slice(open + 1, close) : null;
+  };
+
+  const popup = read('popup.js');
+  const worker = read('background.js');
+  const manifest = JSON.parse(read('manifest.json'));
+
+  const fromPopup = declaration(popup, 'UNTIL_KEY');
+  const fromWorker = declaration(worker, 'UNTIL_KEY');
+
+  if (!fromPopup || !fromWorker) {
+    fail('could not read UNTIL_KEY from both popup.js and background.js');
+  } else if (fromPopup !== fromWorker) {
+    fail(`UNTIL_KEY disagrees: popup.js "${fromPopup}" vs background.js "${fromWorker}"`);
+  } else {
+    pass(`deadline key agrees: ${fromPopup}`);
+  }
+
+  // Without the alarm a browser that stays open past the deadline keeps
+  // blocking until something reloads the worker, which may be hours later.
+  (manifest.permissions || []).includes('alarms')
+    ? pass('the worker may arm an expiry alarm')
+    : fail('"alarms" is missing from permissions - a timed session would never end on its own');
+
+  worker.includes('chrome.alarms.create')
+    ? pass('background.js arms the expiry alarm')
+    : fail('background.js never calls chrome.alarms.create');
+}
+
 
 /* ------------------------------------------------------------ store buttons */
 
@@ -1415,6 +1465,7 @@ function run() {
   checkSelectors();
   checkOrigin();
   checkPickerWiring();
+  checkTimerWiring();
   checkStoreButtons();
   checkVersionLabels(manifest);
   checkPrivacy();

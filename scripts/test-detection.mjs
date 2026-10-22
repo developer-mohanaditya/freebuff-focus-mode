@@ -586,6 +586,9 @@ const badgeTexts = [];
 const sessionState = {};
 const syncStore = {};
 const rulesetUpdates = [];
+const alarmsCreated = [];
+const alarmsCleared = [];
+const alarmHandlers = [];
 
 new Function('chrome', BACKGROUND)({
   runtime: {
@@ -596,8 +599,15 @@ new Function('chrome', BACKGROUND)({
   },
   storage: {
     sync: {
+      // Writes land in the store, the way Chrome does it: the worker reads the
+      // setting back on the next line, so a stub that only records would let a
+      // broken read pass.
       get: (defaults, cb) => cb({ ...defaults, ...syncStore }),
-      set: (values) => syncWrites.push(values),
+      set: (values, cb) => {
+        syncWrites.push(values);
+        Object.assign(syncStore, values);
+        if (cb) cb();
+      },
     },
     session: {
       get: (defaults, cb) => cb({ ...defaults, ...sessionState }),
@@ -617,6 +627,14 @@ new Function('chrome', BACKGROUND)({
   action: {
     setBadgeText: ({ text }) => badgeTexts.push(text),
     setBadgeBackgroundColor: () => undefined,
+  },
+  alarms: {
+    create: (name, info) => alarmsCreated.push({ name, info }),
+    clear: (name, cb) => {
+      alarmsCleared.push(name);
+      if (cb) cb();
+    },
+    onAlarm: { addListener: (fn) => alarmHandlers.push(fn) },
   },
   tabs: { onRemoved: { addListener: () => undefined } },
 });
@@ -643,12 +661,114 @@ check('a stored focus setting enables blocking at startup', JSON.stringify(rules
 
 check('the worker watches the setting', changedHandlers.length > 0, true);
 rulesetUpdates.length = 0;
+syncStore.freebuffFocusEnabled = false;
 for (const fn of changedHandlers) fn({ freebuffFocusEnabled: { newValue: false } }, 'sync');
 check('leaving focus turns blocking off', JSON.stringify(rulesetUpdates[0]), JSON.stringify({ disableRulesetIds: ['focus_rules'] }));
 
 rulesetUpdates.length = 0;
 for (const fn of changedHandlers) fn({ hiddenCounts: { newValue: {} } }, 'session');
 check('an unrelated storage change touches no ruleset', rulesetUpdates.length, 0);
+
+/* ------------------------------------------------------------ timed sessions */
+
+console.log('\ntimed sessions');
+
+const ALARM = 'freebuff-focus:expiry';
+
+// A deadline in the future is one armed alarm, and the ruleset follows the
+// setting in the same pass - never two reads that could disagree.
+const soon = Date.now() + 25 * 60000;
+syncStore.freebuffFocusEnabled = true;
+syncStore.freebuffFocusUntil = soon;
+alarmsCreated.length = 0;
+alarmsCleared.length = 0;
+rulesetUpdates.length = 0;
+for (const fn of changedHandlers) fn({ freebuffFocusUntil: { newValue: soon } }, 'sync');
+check('a timed session arms exactly one alarm', alarmsCreated.length, 1);
+check('the alarm is named for the session', alarmsCreated[0] && alarmsCreated[0].name, ALARM);
+check('the alarm fires at the deadline', alarmsCreated[0] && alarmsCreated[0].info.when, soon);
+check(
+  'a timed session enables blocking',
+  JSON.stringify(rulesetUpdates[0]),
+  JSON.stringify({ enableRulesetIds: ['focus_rules'] })
+);
+
+// "Until I switch it off" is the pre-timer behaviour: enabled with no deadline.
+// Any alarm left over from an earlier session has to go, or it would end a
+// session that was never meant to end.
+syncStore.freebuffFocusUntil = null;
+alarmsCreated.length = 0;
+alarmsCleared.length = 0;
+for (const fn of changedHandlers) fn({ freebuffFocusUntil: { newValue: null } }, 'sync');
+check('an untimed session arms no alarm', alarmsCreated.length, 0);
+check('and drops the one that was armed', alarmsCleared.includes(ALARM), true);
+
+// The alarm is only a wake-up call; the deadline is what ends the session.
+syncStore.freebuffFocusEnabled = true;
+syncStore.freebuffFocusUntil = Date.now() - 1000;
+syncWrites.length = 0;
+rulesetUpdates.length = 0;
+for (const fn of alarmHandlers) fn({ name: ALARM });
+check(
+  'the deadline turns focus off and clears itself',
+  JSON.stringify(syncWrites[0]),
+  JSON.stringify({ freebuffFocusEnabled: false, freebuffFocusUntil: null })
+);
+check(
+  'and blocking goes off with it',
+  JSON.stringify(rulesetUpdates[0]),
+  JSON.stringify({ disableRulesetIds: ['focus_rules'] })
+);
+
+// Chrome can deliver an alarm slightly early after the machine wakes, and the
+// system clock can move backwards. A session must not end before its deadline.
+const later = Date.now() + 10 * 60000;
+syncStore.freebuffFocusEnabled = true;
+syncStore.freebuffFocusUntil = later;
+syncWrites.length = 0;
+alarmsCreated.length = 0;
+for (const fn of alarmHandlers) fn({ name: ALARM });
+check('an early alarm writes no setting', syncWrites.length, 0);
+check('and is armed again for the deadline', alarmsCreated[0] && alarmsCreated[0].info.when, later);
+
+// A browser closed at the deadline starts with no alarm at all, so the stored
+// deadline has to be settled on the way in.
+syncStore.freebuffFocusEnabled = true;
+syncStore.freebuffFocusUntil = Date.now() - 60 * 60 * 1000;
+syncWrites.length = 0;
+alarmsCreated.length = 0;
+rulesetUpdates.length = 0;
+for (const fn of startupHandlers) fn();
+check(
+  'startup ends a session whose deadline passed while closed',
+  JSON.stringify(syncWrites[0]),
+  JSON.stringify({ freebuffFocusEnabled: false, freebuffFocusUntil: null })
+);
+check('and never re-arms it', alarmsCreated.length, 0);
+check(
+  'and blocking is off',
+  JSON.stringify(rulesetUpdates[rulesetUpdates.length - 1]),
+  JSON.stringify({ disableRulesetIds: ['focus_rules'] })
+);
+
+// An untimed session still survives a restart - the thing the extension did
+// before timed focus existed, and what a 1.8 setting looks like.
+syncStore.freebuffFocusEnabled = true;
+syncStore.freebuffFocusUntil = null;
+syncWrites.length = 0;
+alarmsCreated.length = 0;
+rulesetUpdates.length = 0;
+for (const fn of startupHandlers) fn();
+check('an untimed session survives a restart', syncWrites.length, 0);
+check('still blocking', JSON.stringify(rulesetUpdates[0]), JSON.stringify({ enableRulesetIds: ['focus_rules'] }));
+check('and arms nothing', alarmsCreated.length, 0);
+
+// Some other extension's alarm must not end this session.
+syncStore.freebuffFocusEnabled = true;
+syncStore.freebuffFocusUntil = Date.now() + 60000;
+syncWrites.length = 0;
+for (const fn of alarmHandlers) fn({ name: 'someone-else' });
+check('a foreign alarm is ignored', syncWrites.length, 0);
 
 const failed = results.filter((r) => !r).length;
 console.log('');
