@@ -9,13 +9,13 @@
     "preview": "node scripts/build.mjs && node scripts/serve.mjs",
     "start": "node scripts/serve.mjs",
     "icons": "node scripts/gen-icons.mjs",
-    "assets": "node scripts/store-assets.mjs",
+    "assets": "node scripts/build-realistic-assets.mjs",
     "validate": "node scripts/validate.mjs",
     "test": "node scripts/test-detection.mjs && node scripts/test-site.mjs && node scripts/test-desktop.mjs && node scripts/test-desktop-windows.mjs && node scripts/test-desktop-linux.mjs",
     "test:desktop": "node scripts/test-desktop.mjs",
     "test:windows": "node scripts/test-desktop-windows.mjs",
     "test:linux": "node scripts/test-desktop-linux.mjs",
-    "check": "node --check scripts/build.mjs && node --check scripts/build-desktop.mjs && node --check scripts/serve.mjs && node --check scripts/zip.mjs && node --check scripts/png.mjs && node --check scripts/store-assets.mjs && node --check scripts/validate.mjs && node --check scripts/desktop-fixtures.mjs && node --check scripts/test-desktop.mjs && node --check scripts/test-desktop-windows.mjs && node --check scripts/test-desktop-linux.mjs",
+    "check": "node --check scripts/build.mjs && node --check scripts/build-desktop.mjs && node --check scripts/serve.mjs && node --check scripts/zip.mjs && node --check scripts/png.mjs && node --check scripts/build-realistic-assets.mjs && node --check scripts/generate-realistic-assets.mjs && node --check scripts/validate.mjs && node --check scripts/desktop-fixtures.mjs && node --check scripts/test-desktop.mjs && node --check scripts/test-desktop-windows.mjs && node --check scripts/test-desktop-linux.mjs",
     "dev": "node scripts/dev.mjs"
   },
   "dependencies": {

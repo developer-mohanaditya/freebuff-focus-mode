@@ -1,7 +1,6 @@
 # Secrets and local environment files
 .env
 .env.*
-!.env.example
 
 # Dependencies
 node_modules/
@@ -17,4 +16,5 @@ _metadata/
 
 # Internal notes and reference documentation
 for-future-reference/
+docs/
 

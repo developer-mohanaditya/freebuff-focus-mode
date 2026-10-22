@@ -104,8 +104,7 @@ npm run validate  # static checks
 npm test          # content, site, and desktop suites
 ```
 
-`dist/` is the whole deployment: static files, no secrets. See `docs/` for the publishing
-guide and the full project history notes.
+`dist/` is the whole deployment: static files, no secrets.
 
 ## License
 
