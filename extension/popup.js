@@ -264,6 +264,45 @@ clearButton.addEventListener('click', () => {
   chrome.storage.sync.set({ [CUSTOM_KEY]: [] }, () => renderCustom([]));
 });
 
+/* --------------------------------------------------------- keyboard shortcut */
+
+const PICK_COMMAND = 'start-picking';
+const pickKeyEl = document.getElementById('pickKey');
+const MAC_KEYS = { Alt: '⌥', Shift: '⇧', Ctrl: '⌃', Command: '⌘' };
+
+/**
+ * Show the key the command is currently bound to.
+ *
+ * Chrome stores "Alt+Shift+F" and names keys the same way on every platform, so
+ * the Mac spelling is ours to add: Option is Alt there, and nobody looks for a
+ * key labelled "Alt" on a Mac keyboard. A shortcut the reader removed at
+ * chrome://extensions/shortcuts comes back empty and the hint hides itself -
+ * the button still picks.
+ */
+function renderShortcut(shortcut) {
+  if (!pickKeyEl) return;
+
+  const parts = String(shortcut || '').split('+').filter(Boolean);
+  if (!parts.length) {
+    pickKeyEl.hidden = true;
+    return;
+  }
+
+  const mac = /Mac OS X|Macintosh/i.test(navigator.userAgent);
+  pickKeyEl.textContent = mac
+    ? parts.map((part) => MAC_KEYS[part] || part).join('')
+    : parts.join('+');
+  pickKeyEl.hidden = false;
+  pickButton.title = `Hide an element in focus (${pickKeyEl.textContent})`;
+}
+
+if (chrome.commands && chrome.commands.getAll) {
+  chrome.commands.getAll((commands) => {
+    const command = (commands || []).find((entry) => entry.name === PICK_COMMAND);
+    renderShortcut(command && command.shortcut);
+  });
+}
+
 /* ------------------------------------------------------------------- status */
 
 const statusEl = document.getElementById('statusText');

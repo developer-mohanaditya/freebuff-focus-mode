@@ -635,6 +635,10 @@ const rulesetUpdates = [];
 const alarmsCreated = [];
 const alarmsCleared = [];
 const alarmHandlers = [];
+const commandHandlers = [];
+const tabMessages = [];
+// The active tab the worker falls back to when Chrome hands it no tab.
+const activeTabs = [{ id: 7, url: 'https://freebuff.com/chat' }];
 
 new Function('chrome', BACKGROUND)({
   runtime: {
@@ -682,7 +686,17 @@ new Function('chrome', BACKGROUND)({
     },
     onAlarm: { addListener: (fn) => alarmHandlers.push(fn) },
   },
-  tabs: { onRemoved: { addListener: () => undefined } },
+  commands: {
+    onCommand: { addListener: (fn) => commandHandlers.push(fn) },
+  },
+  tabs: {
+    onRemoved: { addListener: () => undefined },
+    query: (info, cb) => cb(activeTabs.slice()),
+    sendMessage: (tabId, message, cb) => {
+      tabMessages.push({ tabId, message });
+      if (cb) cb();
+    },
+  },
 });
 
 check('the worker registers one install handler', installHandlers.length, 1);
@@ -815,6 +829,51 @@ syncStore.freebuffFocusUntil = Date.now() + 60000;
 syncWrites.length = 0;
 for (const fn of alarmHandlers) fn({ name: 'someone-else' });
 check('a foreign alarm is ignored', syncWrites.length, 0);
+
+/* --------------------------------------------------------------- shortcut */
+
+/**
+ * Option+Shift+F, declared in the manifest and collected by the worker.
+ *
+ * The command is a second way into the same picker the popup opens, so the
+ * checks are about routing: it has to reach the freebuff.com tab with the same
+ * message the popup sends, and it must do nothing anywhere else - a global
+ * shortcut that half-works on another site is worse than no shortcut.
+ */
+console.log('\nkeyboard shortcut');
+
+const command = MANIFEST.commands && MANIFEST.commands['start-picking'];
+check('the manifest declares the picker command', Boolean(command), true);
+check('with a default key', command && command.suggested_key && command.suggested_key.default, 'Alt+Shift+F');
+// On a Mac Chrome calls Option "Alt", so this is the same physical chord.
+check('and the same chord on a Mac', command && command.suggested_key && command.suggested_key.mac, 'Alt+Shift+F');
+check('and a description the shortcut editor can show', Boolean(command && command.description), true);
+
+check('the worker watches for the command', commandHandlers.length, 1);
+
+// The exact chord the popup sends: one picker, one message type.
+tabMessages.length = 0;
+for (const fn of commandHandlers) fn('start-picking', { id: 7, url: 'https://freebuff.com/chat' });
+check('the shortcut asks this tab to pick', tabMessages.length, 1);
+check('on the tab it fired in', tabMessages[0] && tabMessages[0].tabId, 7);
+check('with the picker message', tabMessages[0] && tabMessages[0].message.type, 'freebuff-focus:pick');
+
+// Chrome does not always pass the tab, and the active-tab fallback is what
+// makes the shortcut work while the popup has never been opened.
+tabMessages.length = 0;
+for (const fn of commandHandlers) fn('start-picking');
+check('without a tab argument it uses the active tab', tabMessages[0] && tabMessages[0].tabId, 7);
+
+// Someone else's command name, and a non-Freebuff tab.
+tabMessages.length = 0;
+for (const fn of commandHandlers) fn('someone-else', { id: 7, url: 'https://freebuff.com/chat' });
+check('an unknown command is ignored', tabMessages.length, 0);
+
+for (const url of ['https://example.com/', 'https://notfreebuff.com/', 'https://freebuff.com.evil.test/']) {
+  tabMessages.length = 0;
+  for (const fn of commandHandlers) fn('start-picking', { id: 9, url });
+  check(`the shortcut does nothing on ${url}`, tabMessages.length, 0);
+}
 
 const failed = results.filter((r) => !r).length;
 console.log('');

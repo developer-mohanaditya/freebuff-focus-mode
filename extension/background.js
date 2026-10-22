@@ -7,7 +7,8 @@
  *
  * Responsibilities:
  *   - turn network blocking on and off with the focus setting,
- *   - end a timed session at its deadline, and
+ *   - end a timed session at its deadline,
+ *   - start the element picker from the keyboard shortcut, and
  *   - reset the per-tab count on install and at browser start (never the
  *     enabled state: a missing key is the default), and
  *   - keep a per-tab hidden-element count and mirror it onto the toolbar badge
@@ -24,7 +25,10 @@ const EXPIRY_ALARM = 'freebuff-focus:expiry';
 const RULESET_ID = 'focus_rules';
 const COUNTS_KEY = 'hiddenCounts';
 const MESSAGE_TYPE = 'freebuff-focus:hidden';
+const PICK_TYPE = 'freebuff-focus:pick';
+const PICK_COMMAND = 'start-picking';
 const MAX_BADGE = '999+';
+const SITE_URL = /^https?:\/\/([a-z0-9-]+\.)*freebuff\.com(\/|$)/i;
 
 /* ------------------------------------------------------------- initialisation */
 
@@ -191,6 +195,36 @@ function paintAllBadges() {
     for (const tabId of Object.keys(counts)) paintBadge(Number(tabId), counts[tabId]);
   });
 }
+
+/* ---------------------------------------------------------------- shortcut */
+
+/**
+ * The keyboard shortcut, declared in the manifest as `start-picking`.
+ *
+ * Alt+Shift+F is Option+Shift+F on a Mac - Chrome maps `Alt` to Option - and it
+ * lands here even though the popup is closed, which is the point: picking an
+ * element should not require opening the popup first. The message is the same
+ * one the popup sends, so both routes go through content.js's single entry
+ * point.
+ */
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command !== PICK_COMMAND) return;
+
+  const pick = (target) => {
+    if (!target || target.id === undefined) return;
+    if (!SITE_URL.test(target.url || '')) return;
+    // A tab loaded before the extension has no listener; lastError is the
+    // expected answer there and there is nothing useful to say about it.
+    chrome.tabs.sendMessage(target.id, { type: PICK_TYPE }, () => void chrome.runtime.lastError);
+  };
+
+  // Chrome hands the command the tab it fired in; query when it does not.
+  if (tab && tab.id !== undefined) {
+    pick(tab);
+    return;
+  }
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => pick(tabs && tabs[0]));
+});
 
 /* ------------------------------------------------------------------ teardown */
 
