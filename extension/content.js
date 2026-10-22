@@ -161,6 +161,11 @@
     '[contenteditable="true"]',
   ].join(', ');
 
+  // The document itself. Every other structural element is refused once by the
+  // picker and can then be hidden deliberately (second click); hiding these
+  // two leaves nothing on screen to undo it with, so they stay refused.
+  const UNHIDEABLE_TAGS = new Set(['HTML', 'HEAD']);
+
   // Tier B - exact attribute tokens, split on - _ and whitespace.
   const AD_TOKENS = new Set([
     'ad',
@@ -1134,6 +1139,12 @@
   let pickBar = null;
   let pickHovered = null;
   let pickHoveredOutline = '';
+  // A refused structural element, and how long the offer to override lasts.
+  // Hiding `main` or a full-width wrapper is occasionally the whole point -
+  // the guard exists to stop accidents, not to overrule the person clicking.
+  let confirmTarget = null;
+  let confirmUntil = 0;
+  const CONFIRM_WINDOW = 5000;
 
   function isDigit(ch) {
     return ch >= '0' && ch <= '9';
@@ -1162,6 +1173,11 @@
       return `${tag}[${name}]`;
     }
 
+    // A tag that appears once in the document is the whole selector. It beats
+    // a structural path, which breaks the moment a wrapper is added - and it is
+    // what makes `main` or `body` a durable rule rather than a fragile one.
+    if (document.getElementsByTagName(tag).length === 1) return tag;
+
     const path = [];
     let node = el;
     let depth = 0;
@@ -1178,7 +1194,9 @@
       depth++;
     }
 
-    return path.join(' > ');
+    // Body has no ancestors inside the walk, and an element with no attributes
+    // still deserves a rule that survives a reload.
+    return path.join(' > ') || tag;
   }
 
   function highlight(el) {
@@ -1211,11 +1229,27 @@
     event.preventDefault();
     event.stopPropagation();
 
-    if (isNeverHidden(el) || el === document.body) {
-      if (pickBar) pickBar.textContent = 'That is part of the page frame - pick something smaller.';
+    // The document itself is never a target: the page would go blank and take
+    // the picker bar with it, so there would be nothing left to click.
+    if (UNHIDEABLE_TAGS.has(el.tagName)) {
+      if (pickBar) pickBar.textContent = 'That is the document itself - pick something inside it.';
       return;
     }
 
+    if (isNeverHidden(el) || el === document.body) {
+      const now = Date.now();
+      if (confirmTarget !== el || now >= confirmUntil) {
+        confirmTarget = el;
+        confirmUntil = now + CONFIRM_WINDOW;
+        if (pickBar) {
+          pickBar.textContent = 'That is part of the page frame - click it again to hide it anyway.';
+        }
+        return;
+      }
+      // Second click on the same element inside the window: consented.
+    }
+
+    confirmTarget = null;
     rememberSelector(describeElement(el));
     hide(el);
     stopPicking();
@@ -1262,6 +1296,8 @@
     document.removeEventListener('keydown', onPickKey, true);
 
     highlight(null);
+    confirmTarget = null;
+    confirmUntil = 0;
     if (pickBar && pickBar.parentElement) pickBar.parentElement.removeChild(pickBar);
     pickBar = null;
   }
