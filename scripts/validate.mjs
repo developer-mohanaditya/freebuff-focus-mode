@@ -279,6 +279,7 @@ function checkPopup() {
     'clearCustom',
     'chips',
     'timerNote',
+    'pickKey',
   ]) {
     html.includes(`id="${id}"`)
       ? pass(`popup has #${id}`)
@@ -548,6 +549,48 @@ function checkPickerWiring() {
       ? pass(`content.js keeps ${needle}`)
       : fail(`content.js no longer defines ${needle} - hand-picked rules would break`);
   }
+
+  // The keyboard shortcut is a third route into the same picker, and it is
+  // declared in one file and handled in another. A rename in either leaves a
+  // chord that Chrome accepts and the worker silently drops.
+  const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
+  const commands = manifest.commands || {};
+  const names = Object.keys(commands);
+
+  const commandName = declaration(path.join(EXT, 'background.js'), 'PICK_COMMAND');
+  if (!commandName) fail('could not read PICK_COMMAND from background.js');
+  else if (!commands[commandName]) fail(`background.js handles "${commandName}", which the manifest does not declare`);
+  else pass(`the shortcut command agrees: ${commandName}`);
+
+  const fromWorker = declaration(path.join(EXT, 'background.js'), 'PICK_TYPE');
+  if (!fromWorker) fail('could not read PICK_TYPE from background.js');
+  else if (fromWorker !== fromContent) fail(`PICK_TYPE disagrees: content.js "${fromContent}" vs background.js "${fromWorker}"`);
+  else pass('the shortcut sends the same message the popup does');
+
+  const shortcut = names.length ? commands[names[0]].suggested_key || {} : {};
+  // Chrome refuses a command with no Ctrl or Alt, so a shortcut built only from
+  // Shift and a letter would never bind and the chord would do nothing.
+  const keys = [shortcut.default, shortcut.mac].filter(Boolean);
+  const bindable = keys.length > 0 && keys.every((key) => /(^|\+)(Ctrl|Alt|Command)(\+|$)/.test(key));
+  bindable
+    ? pass(`shortcut binds a modifier Chrome accepts: ${keys.join(' / ')}`)
+    : fail(`shortcut "${keys.join(', ') || 'none'}" needs Ctrl or Alt - Chrome will not bind it`);
+
+  for (const name of names) {
+    commands[name].description
+      ? pass(`shortcut ${name} has a description`)
+      : fail(`shortcut ${name} has no description - the shortcuts page shows a blank row`);
+  }
+
+  const popupSource = fs.readFileSync(path.join(EXT, 'popup.js'), 'utf8');
+  popupSource.includes('chrome.commands.getAll')
+    ? pass('popup reads the bound key back from the browser')
+    : fail('popup.js never calls chrome.commands.getAll - the hint could disagree with the real binding');
+
+  const workerSource = fs.readFileSync(path.join(EXT, 'background.js'), 'utf8');
+  workerSource.includes('chrome.commands.onCommand')
+    ? pass('background.js listens for the shortcut')
+    : fail('background.js never subscribes to chrome.commands.onCommand - the shortcut would do nothing');
 }
 
 /* -------------------------------------------------------------- timed focus */

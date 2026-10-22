@@ -16,6 +16,15 @@
   "background": {
     "service_worker": "background.js"
   },
+  "commands": {
+    "start-picking": {
+      "suggested_key": {
+        "default": "Alt+Shift+F",
+        "mac": "Alt+Shift+F"
+      },
+      "description": "Hide an element on freebuff.com"
+    }
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "Freebuff Focus Mode",

@@ -108,7 +108,13 @@ function formatBytes(bytes) {
 function packageAll(version, manifest) {
   fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
 
-  const files = walk(EXT_DIR).sort();
+  // Load the folder unpacked once and Chromium writes `_metadata/` beside the
+  // manifest - its own index of the ruleset. It is a cache, not part of the
+  // extension: shipped to the Web Store it pins a stale ruleset and AMO flags
+  // it, so it never enters a package.
+  const files = walk(EXT_DIR)
+    .filter((relative) => !relative.split(path.sep)[0].startsWith('_metadata'))
+    .sort();
   if (!files.includes('manifest.json')) {
     throw new Error('extension/manifest.json not found - nothing to package');
   }
