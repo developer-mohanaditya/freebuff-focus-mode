@@ -98,6 +98,8 @@
     '[data-ad-unit]',
     '[data-ad-container]',
     '[data-ad-client]',
+    '[data-chat-ad-slot]',
+    '.workspace-phone-ad',
     '[data-google-query-id]',
     // Ad-network hooks. These are the strongest signals in the file: a
     // first-party data attribute written by the ad server itself, the standard
@@ -338,6 +340,26 @@
   let hiddenTotal = 0;
 
   /* ------------------------------------------------------------------ setup */
+
+  const SCRIPT_SHIM_ID = 'freebuff-focus-core';
+
+  function injectMainScript() {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById(SCRIPT_SHIM_ID)) return;
+    const target = document.head || document.documentElement;
+    if (!target) {
+      document.addEventListener('DOMContentLoaded', injectMainScript, { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.id = SCRIPT_SHIM_ID;
+    try {
+      script.src = chrome.runtime.getURL('content-main.js');
+    } catch {
+      return;
+    }
+    target.appendChild(script);
+  }
 
   function injectStyle() {
     if (styleEl && styleEl.isConnected) return styleEl;
@@ -1082,6 +1104,7 @@
     if (document.getElementById(STYLE_ID)) return;
 
     clearLegacy();
+    injectMainScript();
     injectStyle();
     injectCustomStyle();
     readState();
@@ -1329,5 +1352,6 @@
     });
   });
 
+  injectMainScript();
   init();
 })();

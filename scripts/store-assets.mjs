@@ -965,10 +965,6 @@ const invokedDirectly =
   process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (invokedDirectly) {
-  const written = generateStoreAssets({ ascii: process.argv.includes('--preview') });
-  for (const image of written) {
-    console.log(
-      `[assets] site/store-assets/${image.fileName}  ${image.width}x${image.height}  ${(image.bytes / 1024).toFixed(1)} KB`
-    );
-  }
+  const { buildAllAssets } = await import('./build-realistic-assets.mjs');
+  buildAllAssets();
 }

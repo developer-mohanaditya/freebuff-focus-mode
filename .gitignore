@@ -12,3 +12,9 @@ dist/
 # OS/editor files
 .DS_Store
 .vscode/
+_metadata/
+**/_metadata/
+
+# Internal notes and reference documentation
+for-future-reference/
+

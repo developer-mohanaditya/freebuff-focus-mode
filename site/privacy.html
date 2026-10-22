@@ -23,7 +23,7 @@
         <span class="brand-name">Freebuff Focus Mode</span>
       </a>
       <!-- Same tag as the install page: one product, one version. -->
-      <span class="pill">v<span data-version>1.8.2</span></span>
+      <span class="pill">v<span data-version>1.8.3</span></span>
     </header>
 
     <main>
@@ -113,6 +113,11 @@
           <h2>Permissions, and why each one is needed</h2>
           <ul>
             <li>
+              <strong><code>alarms</code></strong>, schedule the automatic end of a timed focus
+              session (15m, 25m, 45m). When the timer fires, the background worker turns focus off
+              and restores original slots without keeping a process running continuously in memory.
+            </li>
+            <li>
               <strong><code>declarativeNetRequest</code></strong>, pause requests to known
               ad-network hosts that originate from freebuff.com pages, while focus is on.
             </li>
@@ -176,7 +181,7 @@
           </p>
 
           <p class="fine">Last updated: October 2026 · applies to Freebuff Focus Mode
-            <span data-version>1.8.2</span> and later. Unofficial project, not affiliated with Freebuff or Codebuff.</p>
+            <span data-version>1.8.3</span> and later. Unofficial project, not affiliated with Freebuff or Codebuff.</p>
         </div>
       </section>
     </main>
@@ -210,7 +215,7 @@
         </div>
       </div>
       <p>
-        Freebuff Focus Mode · v<span data-version>1.8.2</span> · ads on by default, no accounts, no
+        Freebuff Focus Mode · v<span data-version>1.8.3</span> · ads on by default, no accounts, no
         telemetry.
       </p>
       <p class="fine">
