@@ -83,7 +83,7 @@ param(
 if ($null -eq $Arguments) { $Arguments = @() }
 
 # Stamped at build time (scripts/build-desktop.mjs).
-$Version = '1.8.2'
+$Version = '1.8.3'
 # The test suite points this at a file:// copy so update can be exercised without
 # the network. Nothing else sets it.
 $Origin = if ($env:FREEBUFF_FOCUS_ORIGIN) { $env:FREEBUFF_FOCUS_ORIGIN } else { 'https://freebuff-focusmode.vercel.app' }

@@ -151,6 +151,7 @@ export function createZip(entries) {
 /** Recursively list files under `dir`, returning paths relative to it. */
 export function walk(dir, base = dir, out = []) {
   for (const dirent of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (dirent.name.startsWith('.') || dirent.name === '_metadata') continue;
     const full = path.join(dir, dirent.name);
     if (dirent.isDirectory()) walk(full, base, out);
     else if (dirent.isFile()) out.push(path.relative(base, full));

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Freebuff Focus Mode",
   "short_name": "FB Focus",
-  "version": "1.8.2",
+  "version": "1.8.3",
   "description": "Quiet focus sessions for freebuff.com. Ads on by default, hidden only while you focus.",
   "permissions": [
     "alarms",
@@ -48,10 +48,32 @@
         "*://*.freebuff.com/*"
       ],
       "js": [
+        "content-main.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://freebuff.com/*",
+        "*://*.freebuff.com/*"
+      ],
+      "js": [
         "content.js"
       ],
-      "run_at": "document_idle",
+      "run_at": "document_start",
       "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content-main.js"
+      ],
+      "matches": [
+        "*://freebuff.com/*",
+        "*://*.freebuff.com/*"
+      ]
     }
   ],
   "declarative_net_request": {
