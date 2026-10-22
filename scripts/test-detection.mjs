@@ -441,6 +441,52 @@ check('Esc cancels without hiding anything', hidden('other-unit'), false);
 check('picker bar is gone after Esc', !!document.getElementById('freebuff-focus-picker'), false);
 check('messages still visible after picking', hidden('assistant'), false);
 
+// A structural element is refused once, then accepted on a second click. The
+// guard has to stay loud enough to stop an accident and quiet enough not to
+// overrule a person who really does want the wrapper gone.
+console.log('\npicker override for page structure');
+const shell = document.querySelector('main');
+const barText = () => (document.getElementById('freebuff-focus-picker') || {}).textContent || '';
+
+sendMessage('freebuff-focus:pick');
+const refused = new window.MouseEvent('click', { bubbles: true, cancelable: true });
+shell.dispatchEvent(refused);
+await new Promise((r) => setTimeout(r, 40));
+check('the first click on page structure hides nothing', hidden('assistant') || shell.classList.contains(HIDDEN), false);
+check('and says how to override it', /click it again/i.test(barText()), true);
+check('the picker stays open after the refusal', !!document.getElementById('freebuff-focus-picker'), true);
+
+shell.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+await new Promise((r) => setTimeout(r, 40));
+check('the second click hides it', shell.classList.contains(HIDDEN), true);
+const pickedRule = store.freebuffFocusSelectors[store.freebuffFocusSelectors.length - 1];
+check('and the rule is saved for next time', !!pickedRule && shell.matches(pickedRule), true);
+console.log(`        saved as: ${pickedRule}`);
+
+// Esc has to clear the pending offer too, or a click minutes later would be
+// treated as consent for something the reader has forgotten about.
+sendMessage('freebuff-focus:pick');
+const navish = document.createElement('header');
+navish.id = 'later-header';
+document.body.appendChild(navish);
+navish.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+sendMessage('freebuff-focus:pick');
+navish.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+await new Promise((r) => setTimeout(r, 40));
+check('a refused click does not survive Esc and cancel the next one', navish.classList.contains(HIDDEN), false);
+document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+// The document itself stays out of reach however often it is clicked.
+sendMessage('freebuff-focus:pick');
+const rootEl = document.documentElement;
+rootEl.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+rootEl.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+await new Promise((r) => setTimeout(r, 40));
+check('html is never hidden', rootEl.classList.contains(HIDDEN), false);
+check('and says so instead', /document itself/i.test(barText()), true);
+document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
 /* --------------------------------------------------------- 1.6 migration */
 
 /**
