@@ -34,6 +34,19 @@
       </button>
     </section>
 
+    <section class="timer">
+      <div class="timer-head">
+        <span class="label">For</span>
+        <span class="hint" id="timerNote">Next session</span>
+      </div>
+      <div class="chips" id="chips" role="group" aria-label="Focus length">
+        <button class="chip" type="button" data-minutes="15" aria-pressed="false">15m</button>
+        <button class="chip" type="button" data-minutes="25" aria-pressed="true">25m</button>
+        <button class="chip" type="button" data-minutes="45" aria-pressed="false">45m</button>
+        <button class="chip" type="button" data-minutes="0" aria-pressed="false">Until off</button>
+      </div>
+    </section>
+
     <section class="stats">
       <span class="count" id="count">0</span>
       <span class="caption">elements quieted on this tab</span>
