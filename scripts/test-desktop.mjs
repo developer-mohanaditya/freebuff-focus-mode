@@ -112,13 +112,12 @@ function makeBundle(body = CURRENT) {
  * packaging tool. `bun` is a shim that runs the patcher on node, which speaks
  * the same fs/crypto API; on a real machine it is the app's own binary.
  */
-function makeShellBundle(body = CURRENT) {
-  const f = makeBundle(body);
-  const res = path.join(f.app, 'Contents', 'Resources');
-  const hw = Buffer.from(
-    'hostedSession = { webRequest: { onBeforeRequest: (fn) => { current = fn } } }\n' +
-      'hostedSession.webRequest.onBeforeRequest(null)\nmodule.exports = {}\n'
-  );
+const SHELL_HW =
+  'hostedSession = { webRequest: { onBeforeRequest: (fn) => { current = fn } } }\n' +
+  'hostedSession.webRequest.onBeforeRequest(null)\nmodule.exports = {}\n';
+
+function buildAsar(hwText) {
+  const hw = Buffer.from(hwText);
   const sha = crypto.createHash('sha256').update(hw).digest('hex');
   const header = {
     files: {
@@ -141,7 +140,13 @@ function makeShellBundle(body = CURRENT) {
   head.writeUInt32LE(jlen + 8, 4);
   head.writeUInt32LE(jlen + 4, 8);
   head.writeUInt32LE(jlen, 12);
-  const asar = Buffer.concat([head, json, Buffer.alloc(pad), hw]);
+  return Buffer.concat([head, json, Buffer.alloc(pad), hw]);
+}
+
+function makeShellBundle(body = CURRENT, hwSource = SHELL_HW) {
+  const f = makeBundle(body);
+  const res = path.join(f.app, 'Contents', 'Resources');
+  const asar = buildAsar(hwSource);
   fs.writeFileSync(path.join(res, 'app.asar'), asar);
 
   const bunDir = path.join(res, 'bun');
@@ -151,7 +156,8 @@ function makeShellBundle(body = CURRENT) {
   fs.chmodSync(bun, 0o755);
 
   f.asar = path.join(res, 'app.asar');
-  f.asarOriginal = Buffer.from(asar);
+  // What install would have backed up: the build as it shipped, before any block.
+  f.asarOriginal = buildAsar(SHELL_HW);
   return f;
 }
 
@@ -319,9 +325,12 @@ const shell = makeShellBundle();
 const shellInstall = run(shell.app, shell.backups, 'install');
 check('install exits 0', shellInstall.status, 0);
 check('it blocks the window as well', /blocked the ad API in app\.asar/.test(shellInstall.stdout));
-check('the asar carries the marker', fs.readFileSync(shell.asar).includes('FBD-ADS-OFF:shell'));
+check('the asar carries the marker', fs.readFileSync(shell.asar).includes('FBD-ADS-OFF:shell-v2'));
 check('the orchestrator is patched too', count(read(shell.target), '/*FBD-ADS-OFF:render*/'), 1);
 check('the rewritten asar still parses', fs.readFileSync(shell.asar).readUInt32LE(4) > 0);
+// 1.9.0 blocked /api/ad/* only, which is the offer flow; the card above the
+// composer comes from /api/web/ads/proposal, so the block has to cover it.
+check('it blocks the composer ad endpoint', fs.readFileSync(shell.asar, 'utf8').includes('/api\\/(?:ads?('));
 
 const shellStatus = run(shell.app, shell.backups, 'status');
 check('status reports the window blocked', /window\s+ad API blocked/.test(shellStatus.stdout));
@@ -334,6 +343,24 @@ check('and leaves the window stage alone', /window\s+ad API blocked/.test(run(sh
 run(shell.app, shell.backups, 'revert');
 check('revert restores the asar byte for byte', fs.readFileSync(shell.asar).equals(shell.asarOriginal));
 check('and the orchestrator with it', read(shell.target) === CURRENT);
+
+// 1.9.0 wrote a block with a narrower URL pattern. install has to rewind that
+// from the pristine backup and re-do it, not leave the old one in place.
+console.log('\nupgrading a block 1.9.0 already wrote');
+const HW_V1 =
+  'hostedSession = { webRequest: { onBeforeRequest: (fn) => { current = fn } } }\n' +
+  'hostedSession.webRequest.onBeforeRequest((_d,_c)=>_c({cancel:/\\/api\\/(?:ad\\/|v1\\/ads(?:[\\/?]|$))/.test(_d.url)}))/*FBD-ADS-OFF:shell*/\n' +
+  'module.exports = {}\n';
+const upgrade = makeShellBundle(CURRENT, HW_V1);
+fs.mkdirSync(upgrade.backups, { recursive: true });
+fs.writeFileSync(path.join(upgrade.backups, 'app.asar.unknown.orig'), upgrade.asarOriginal);
+check('status calls the old block stale', /window\s+older block/.test(run(upgrade.app, upgrade.backups, 'status').stdout));
+const upgraded = run(upgrade.app, upgrade.backups, 'install');
+check('install rewinds it', /older block found/.test(upgraded.stdout));
+check('and installs the wider block', fs.readFileSync(upgrade.asar, 'utf8').includes('web\\/ads'));
+check('status is honest again', /window\s+ad API blocked/.test(run(upgrade.app, upgrade.backups, 'status').stdout));
+run(upgrade.app, upgrade.backups, 'revert');
+check('and revert still restores the pristine bytes', fs.readFileSync(upgrade.asar).equals(upgrade.asarOriginal));
 
 /* ------------------------------------------------------------ display-only */
 

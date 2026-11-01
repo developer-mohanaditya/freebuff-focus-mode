@@ -60,7 +60,7 @@
 set -u
 
 # Stamped at build time (scripts/build-desktop.mjs).
-VERSION="1.9.0"
+VERSION="1.9.1"
 # The test suite points this at a file:// copy so update can be exercised without
 # the network. Nothing else sets it.
 ORIGIN="${FREEBUFF_FOCUS_ORIGIN:-https://freebuff-focusmode.vercel.app}"
@@ -1210,7 +1210,7 @@ cmd_help() {
 # network. Only electron/hosted-workspace.cjs changes; every other entry is
 # copied byte for byte and the asar integrity hashes are recomputed.
 
-SHELL_JS_TAG='v1'
+SHELL_JS_TAG='v2'
 
 shell_js_path() {
   mkdir -p "$SESSION_DIR" 2>/dev/null || return 1
@@ -1224,9 +1224,11 @@ shell_js_path() {
 'use strict';
 const fs = require('fs');
 const crypto = require('crypto');
-const MARK = '/*FBD-ADS-OFF:shell*/';
+const MARK = '/*FBD-ADS-OFF:shell-v2*/';
+const PREV = '/*FBD-ADS-OFF:shell*/';
 const OLD = 'hostedSession.webRequest.onBeforeRequest(null)';
-const NEW = 'hostedSession.webRequest.onBeforeRequest((_d,_c)=>_c({cancel:/\\/api\\/(?:ad\\/|v1\\/ads(?:[\\/?]|$))/.test(_d.url)}))' + MARK;
+const PATHS = '/^\\/api\\/(?:ads?(?:\\/|$)|web\\/ads(?:\\/|$)|ad-|sponsored-|google-ads(?:\\/|$)|advertiser|meta\\/ads-|telemetry\\/ad-)/i';
+const NEW = 'hostedSession.webRequest.onBeforeRequest((_d,_c)=>{let p=_d.url;try{p=new URL(_d.url).pathname}catch(e){}return _c({cancel:' + PATHS + '.test(p)})})' + MARK;
 function readAsar(p) {
   const buf = fs.readFileSync(p);
   if (buf.length < 16) throw new Error('not an asar');
@@ -1254,11 +1256,11 @@ function main(argv) {
   const text = read(target).toString('utf8');
   const patched = text.includes(MARK);
   if (mode === 'check') {
-    console.log(JSON.stringify({ patched, anchor: text.includes(OLD), files: files.length }));
+    console.log(JSON.stringify({ patched, stale: !patched && text.includes(PREV), anchor: text.includes(OLD), files: files.length }));
     return;
   }
   if (patched) { console.log('already patched'); return; }
-  if (!text.includes(OLD)) throw new Error('anchor not found');
+  if (!text.includes(OLD)) throw new Error(text.includes(PREV) ? 'previous block present' : 'anchor not found');
   const nextBuf = Buffer.from(text.replace(OLD, NEW), 'utf8');
   if (target.entry.integrity) {
     const blockSize = target.entry.integrity.blockSize || 4194304;
@@ -1317,6 +1319,7 @@ shell_state() {
   out="$("$bun" "$js" check "$asar" 2>/dev/null)" || { printf 'unsupported\n'; return 0; }
   case "$out" in
     *'"patched":true'*) printf 'patched\n' ;;
+    *'"stale":true'*) printf 'stale\n' ;;
     *'"patched":false'*) printf 'unpatched\n' ;;
     *) printf 'unsupported\n' ;;
   esac
@@ -1325,6 +1328,8 @@ shell_state() {
 shell_apply() {
   app="$1"; version="$2"
   state="$(shell_state "$app")"
+  asar="$app/Contents/Resources/app.asar"
+  backup="$BACKUP_DIR/app.asar.$version.orig"
   case "$state" in
     patched)
       ok "window   the ad API is already blocked in app.asar"
@@ -1332,10 +1337,17 @@ shell_apply() {
     unsupported)
       say "  window   ${DIM}not blocked - this build has no app.asar to rewrite${OFF}"
       return 0 ;;
+    stale)
+      # An older block is in place and matched too few URLs. Its anchor is gone, so
+      # only the pristine backup can be rewritten again.
+      if [ ! -f "$backup" ]; then
+        warn "app.asar has an older block and no pristine backup to re-apply over"
+        return 1
+      fi
+      cp "$backup" "$asar" 2>/dev/null || { warn "could not rewind app.asar to its backup"; return 1; }
+      say "  window   older block found - replacing it" ;;
   esac
-  asar="$app/Contents/Resources/app.asar"
   bun="$(shell_bun "$app")"; js="$(shell_js_path)" || return 1
-  backup="$BACKUP_DIR/app.asar.$version.orig"
   mkdir -p "$BACKUP_DIR" 2>/dev/null || true
   if [ ! -f "$backup" ]; then
     if ! cp "$asar" "$backup" 2>/dev/null; then
@@ -1343,9 +1355,11 @@ shell_apply() {
       return 1
     fi
   fi
-  if ! "$bun" "$js" patch "$asar" >/dev/null 2>&1 || [ "$(shell_state "$app")" != "patched" ]; then
+  patch_err="$("$bun" "$js" patch "$asar" 2>&1)" && patch_ok=1 || patch_ok=0
+  if [ "$patch_ok" = 0 ] || [ "$(shell_state "$app")" != "patched" ]; then
     cp "$backup" "$asar" 2>/dev/null || true
-    warn "could not block the window's ad API - app.asar was put back as it was"
+    reason="$(printf '%s\n' "$patch_err" | grep -m1 -E 'Error: |error: ' | sed 's/^Error: //; s/^ *//')"
+    warn "could not block the window's ad API - app.asar was put back as it was${reason:+ ($reason)}"
     return 1
   fi
   ok "window   blocked the ad API in app.asar"
@@ -1358,13 +1372,14 @@ shell_restore() {
   backup="$BACKUP_DIR/app.asar.$version.orig"
   [ -f "$backup" ] || return 0
   [ -f "$asar" ] || return 0
-  if [ "$(shell_state "$app")" = "patched" ]; then
-    if cp "$backup" "$asar" 2>/dev/null; then
-      ok "restored app.asar from $backup"
-    else
-      warn "could not restore app.asar - copy it back by hand: $backup"
-    fi
-  fi
+  case "$(shell_state "$app")" in
+    patched|stale)
+      if cp "$backup" "$asar" 2>/dev/null; then
+        ok "restored app.asar from $backup"
+      else
+        warn "could not restore app.asar - copy it back by hand: $backup"
+      fi ;;
+  esac
 }
 
 cmd_status() {
@@ -1385,11 +1400,15 @@ cmd_status() {
   render_report "$report"
 
   window_state="$(shell_state "$app")"
-  say "  window   $(case "$window_state" in
-    patched) printf 'ad API blocked (app.asar)' ;;
-    unpatched) printf 'not blocked - run: %s install' "$(cmdname)" ;;
-    *) printf 'n/a on this build' ;;
-  esac)"
+  # A case inside $( ) trips the bash 3.2 that macOS ships as /bin/sh, so the
+  # label is chosen first and printed after.
+  case "$window_state" in
+    patched) window_note="ad API blocked (app.asar)" ;;
+    stale) window_note="older block - run: $(cmdname) install" ;;
+    unpatched) window_note="not blocked - run: $(cmdname) install" ;;
+    *) window_note="n/a on this build" ;;
+  esac
+  say "  window   $window_note"
 
   if [ "$(verdict_of "$report")" = "ok" ]; then
     if all_applied "$report"; then
