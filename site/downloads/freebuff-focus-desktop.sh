@@ -60,7 +60,7 @@
 set -u
 
 # Stamped at build time (scripts/build-desktop.mjs).
-VERSION="1.8.4"
+VERSION="1.9.0"
 # The test suite points this at a file:// copy so update can be exercised without
 # the network. Nothing else sets it.
 ORIGIN="${FREEBUFF_FOCUS_ORIGIN:-https://freebuff-focusmode.vercel.app}"
@@ -1199,6 +1199,174 @@ cmd_help() {
   say "patch reports ${B}not found${OFF}, ${B}scan${OFF} lists what this build does have."
 }
 
+# ------------------------------------------------------------- shell patch
+# The window you actually look at is not the local UI. 0.0.19x opens
+# freebuff.com inside Electron, in its own session (app.asar ->
+# electron/hosted-workspace.cjs), and that page fetches its ads from the site.
+# Nothing in orchestrator.js can reach them. This stage rewrites app.asar so the
+# hosted session cancels the ad API before any card can arrive.
+#
+# app.asar is rewritten by its own bundled bun - no npm, no asar package, no
+# network. Only electron/hosted-workspace.cjs changes; every other entry is
+# copied byte for byte and the asar integrity hashes are recomputed.
+
+SHELL_JS_TAG='v1'
+
+shell_js_path() {
+  mkdir -p "$SESSION_DIR" 2>/dev/null || return 1
+  js="$SESSION_DIR/shell-adblock.js"
+  if [ -f "$js" ] && grep -q "^// shell-adblock $SHELL_JS_TAG$" "$js" 2>/dev/null; then
+    printf '%s\n' "$js"
+    return 0
+  fi
+  cat >"$js" <<'FBD_SHELL_JS'
+// shell-adblock v1
+'use strict';
+const fs = require('fs');
+const crypto = require('crypto');
+const MARK = '/*FBD-ADS-OFF:shell*/';
+const OLD = 'hostedSession.webRequest.onBeforeRequest(null)';
+const NEW = 'hostedSession.webRequest.onBeforeRequest((_d,_c)=>_c({cancel:/\\/api\\/(?:ad\\/|v1\\/ads(?:[\\/?]|$))/.test(_d.url)}))' + MARK;
+function readAsar(p) {
+  const buf = fs.readFileSync(p);
+  if (buf.length < 16) throw new Error('not an asar');
+  const headerSize = buf.readUInt32LE(4);
+  const jlen = buf.readUInt32LE(12);
+  const header = JSON.parse(buf.slice(16, 16 + jlen).toString('utf8').replace(/\0+$/, '').trimEnd());
+  return { buf, header, base: 8 + headerSize };
+}
+function walk(node, prefix, out) {
+  for (const name of Object.keys(node.files || {})) {
+    const entry = node.files[name];
+    const p = prefix ? prefix + '/' + name : name;
+    if (entry.files) walk(entry, p, out);
+    else out.push({ path: p, entry });
+  }
+  return out;
+}
+function main(argv) {
+  const mode = argv[0], asarPath = argv[1];
+  const { buf, header, base } = readAsar(asarPath);
+  const files = walk(header, '', []);
+  const read = (f) => buf.slice(base + Number(f.entry.offset), base + Number(f.entry.offset) + Number(f.entry.size));
+  const target = files.find((f) => f.path === 'electron/hosted-workspace.cjs');
+  if (!target) throw new Error('hosted-workspace.cjs not found');
+  const text = read(target).toString('utf8');
+  const patched = text.includes(MARK);
+  if (mode === 'check') {
+    console.log(JSON.stringify({ patched, anchor: text.includes(OLD), files: files.length }));
+    return;
+  }
+  if (patched) { console.log('already patched'); return; }
+  if (!text.includes(OLD)) throw new Error('anchor not found');
+  const nextBuf = Buffer.from(text.replace(OLD, NEW), 'utf8');
+  if (target.entry.integrity) {
+    const blockSize = target.entry.integrity.blockSize || 4194304;
+    const blocks = [];
+    for (let i = 0; i < nextBuf.length; i += blockSize) {
+      blocks.push(crypto.createHash('sha256').update(nextBuf.slice(i, i + blockSize)).digest('hex'));
+    }
+    target.entry.integrity.hash = crypto.createHash('sha256').update(nextBuf).digest('hex');
+    target.entry.integrity.blocks = blocks;
+  }
+  target.entry.size = nextBuf.length;
+  let offset = 0;
+  const parts = [];
+  for (const f of files) {
+    if (f.entry.unpacked) continue;
+    const body = f === target ? nextBuf : read(f);
+    f.entry.offset = String(offset);
+    offset += body.length;
+    parts.push(body);
+  }
+  const json = Buffer.from(JSON.stringify(header), 'utf8');
+  const pad = (4 - (json.length % 4)) % 4;
+  const jlen = json.length + pad;
+  const head = Buffer.alloc(16);
+  head.writeUInt32LE(4, 0);
+  head.writeUInt32LE(jlen + 8, 4);
+  head.writeUInt32LE(jlen + 4, 8);
+  head.writeUInt32LE(jlen, 12);
+  const out = Buffer.concat([head, json, Buffer.alloc(pad), ...parts]);
+  fs.writeFileSync(asarPath + '.fbd-tmp', out);
+  fs.renameSync(asarPath + '.fbd-tmp', asarPath);
+  console.log(JSON.stringify({ patched: true, size: out.length, files: files.length }));
+}
+main(process.argv.slice(2));
+FBD_SHELL_JS
+  printf '%s\n' "$js"
+}
+
+# The app ships the only runtime this needs. FREEBUFF_FOCUS_BUN is for tests on
+# a machine whose app bundle cannot execute here.
+shell_bun() {
+  if [ -n "${FREEBUFF_FOCUS_BUN:-}" ] && [ -x "$FREEBUFF_FOCUS_BUN" ]; then
+    printf '%s\n' "$FREEBUFF_FOCUS_BUN"
+    return 0
+  fi
+  bun="$1/Contents/Resources/bun/bun"
+  [ -x "$bun" ] && printf '%s\n' "$bun"
+}
+
+# patched | unpatched | unsupported - never a guess about pixels, only the file.
+shell_state() {
+  asar="$1/Contents/Resources/app.asar"
+  [ -f "$asar" ] || { printf 'unsupported\n'; return 0; }
+  bun="$(shell_bun "$1")" || { printf 'unsupported\n'; return 0; }
+  js="$(shell_js_path)" || { printf 'unsupported\n'; return 0; }
+  out="$("$bun" "$js" check "$asar" 2>/dev/null)" || { printf 'unsupported\n'; return 0; }
+  case "$out" in
+    *'"patched":true'*) printf 'patched\n' ;;
+    *'"patched":false'*) printf 'unpatched\n' ;;
+    *) printf 'unsupported\n' ;;
+  esac
+}
+
+shell_apply() {
+  app="$1"; version="$2"
+  state="$(shell_state "$app")"
+  case "$state" in
+    patched)
+      ok "window   the ad API is already blocked in app.asar"
+      return 0 ;;
+    unsupported)
+      say "  window   ${DIM}not blocked - this build has no app.asar to rewrite${OFF}"
+      return 0 ;;
+  esac
+  asar="$app/Contents/Resources/app.asar"
+  bun="$(shell_bun "$app")"; js="$(shell_js_path)" || return 1
+  backup="$BACKUP_DIR/app.asar.$version.orig"
+  mkdir -p "$BACKUP_DIR" 2>/dev/null || true
+  if [ ! -f "$backup" ]; then
+    if ! cp "$asar" "$backup" 2>/dev/null; then
+      warn "could not back up app.asar - leaving the window's ads alone"
+      return 1
+    fi
+  fi
+  if ! "$bun" "$js" patch "$asar" >/dev/null 2>&1 || [ "$(shell_state "$app")" != "patched" ]; then
+    cp "$backup" "$asar" 2>/dev/null || true
+    warn "could not block the window's ad API - app.asar was put back as it was"
+    return 1
+  fi
+  ok "window   blocked the ad API in app.asar"
+  say "  backup   $backup"
+}
+
+shell_restore() {
+  app="$1"; version="$2"
+  asar="$app/Contents/Resources/app.asar"
+  backup="$BACKUP_DIR/app.asar.$version.orig"
+  [ -f "$backup" ] || return 0
+  [ -f "$asar" ] || return 0
+  if [ "$(shell_state "$app")" = "patched" ]; then
+    if cp "$backup" "$asar" 2>/dev/null; then
+      ok "restored app.asar from $backup"
+    else
+      warn "could not restore app.asar - copy it back by hand: $backup"
+    fi
+  fi
+}
+
 cmd_status() {
   app="$(find_app)" || die "Freebuff Desktop was not found in /Applications or ~/Applications.
   Pass --app /path/to/Freebuff.app if it lives somewhere else."
@@ -1216,10 +1384,23 @@ cmd_status() {
   report="$(engine check "$target" "$DEEP")"
   render_report "$report"
 
+  window_state="$(shell_state "$app")"
+  say "  window   $(case "$window_state" in
+    patched) printf 'ad API blocked (app.asar)' ;;
+    unpatched) printf 'not blocked - run: %s install' "$(cmdname)" ;;
+    *) printf 'n/a on this build' ;;
+  esac)"
+
   if [ "$(verdict_of "$report")" = "ok" ]; then
     if all_applied "$report"; then
       say ""
-      say "  ${GREEN}Ads are off.${OFF} Quit Freebuff and reopen it, then check what it loaded:"
+      if [ "$window_state" = "patched" ]; then
+        say "  ${GREEN}Ads are off.${OFF} Quit Freebuff and reopen it, then check what it loaded:"
+      else
+        say "  ${YELLOW}The local ad auction is off, but the window is not.${OFF}"
+        say "  The desktop window renders freebuff.com, whose ads are served by the"
+        say "  site; only the app.asar stage stops those. Run: $(cmdname) install"
+      fi
       say "    $(cmdname) verify"
     else
       say ""
@@ -1287,6 +1468,18 @@ cmd_install() {
     # can do from here. "Nothing to do" alone answered none of that.
     say "  ${GREEN}Already patched.${OFF} Every anchor in this build is already replaced."
     render_report "$report"
+    # An install of 1.9.0 over a bundle patched by 1.8.x lands here: the
+    # orchestrator is already done, the window stage is not.
+    if [ "$(shell_state "$app")" != "patched" ]; then
+      if shell_apply "$app" "$version"; then
+        if [ "$RESIGN" = "1" ] && command -v codesign >/dev/null 2>&1; then
+          codesign --force --deep --sign - "$app" 2>/dev/null \
+            && ok "re-signed the bundle ad-hoc" \
+            || warn "re-sign failed - run: codesign --force --deep --sign - '$app'"
+        fi
+      fi
+      say ""
+    fi
     session_line
     if [ ! -f "$(session_file)" ]; then
       say "  focus    none - ads stay off until you revert"
@@ -1373,6 +1566,11 @@ cmd_install() {
   fi
 
   render_report "$after"
+  say ""
+
+  # The local auction is only half the story: the window renders freebuff.com in
+  # its own session, so its ads have to be blocked there too.
+  shell_apply "$app" "$version" || true
   say ""
 
   if [ "$RESIGN" = "1" ] && command -v codesign >/dev/null 2>&1; then
@@ -1621,6 +1819,12 @@ cmd_revert() {
   backup="$BACKUP_DIR/orchestrator.js.$version.orig"
 
   if [ ! -f "$backup" ]; then
+    if [ -f "$BACKUP_DIR/app.asar.$version.orig" ]; then
+      shell_restore "$app" "$version"
+      say ""
+      say "  Restart Freebuff to bring the window's ads back."
+      return 0
+    fi
     say "No backup for $version in $BACKUP_DIR"
     if [ -d "$BACKUP_DIR" ]; then
       say "Available backups:"
@@ -1642,6 +1846,7 @@ cmd_revert() {
   fi
 
   ok "restored $target from $backup"
+  shell_restore "$app" "$version"
 
   if [ "$RESTART" = "never" ]; then
     say "  Quit Freebuff and reopen it to bring the ads back."

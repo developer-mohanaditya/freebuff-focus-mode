@@ -28,6 +28,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -104,6 +105,57 @@ function makeBundle(body = CURRENT) {
 }
 
 /**
+ * A bundle that also has what 0.0.19x ships for the window: an app.asar holding
+ * electron/hosted-workspace.cjs, and the bun runtime that rewrites it.
+ *
+ * The asar is built here by hand - header, one blob - so the test needs no
+ * packaging tool. `bun` is a shim that runs the patcher on node, which speaks
+ * the same fs/crypto API; on a real machine it is the app's own binary.
+ */
+function makeShellBundle(body = CURRENT) {
+  const f = makeBundle(body);
+  const res = path.join(f.app, 'Contents', 'Resources');
+  const hw = Buffer.from(
+    'hostedSession = { webRequest: { onBeforeRequest: (fn) => { current = fn } } }\n' +
+      'hostedSession.webRequest.onBeforeRequest(null)\nmodule.exports = {}\n'
+  );
+  const sha = crypto.createHash('sha256').update(hw).digest('hex');
+  const header = {
+    files: {
+      electron: {
+        files: {
+          'hosted-workspace.cjs': {
+            size: hw.length,
+            offset: '0',
+            integrity: { algorithm: 'SHA256', hash: sha, blockSize: 4194304, blocks: [sha] },
+          },
+        },
+      },
+    },
+  };
+  const json = Buffer.from(JSON.stringify(header));
+  const pad = (4 - (json.length % 4)) % 4;
+  const jlen = json.length + pad;
+  const head = Buffer.alloc(16);
+  head.writeUInt32LE(4, 0);
+  head.writeUInt32LE(jlen + 8, 4);
+  head.writeUInt32LE(jlen + 4, 8);
+  head.writeUInt32LE(jlen, 12);
+  const asar = Buffer.concat([head, json, Buffer.alloc(pad), hw]);
+  fs.writeFileSync(path.join(res, 'app.asar'), asar);
+
+  const bunDir = path.join(res, 'bun');
+  fs.mkdirSync(bunDir, { recursive: true });
+  const bun = path.join(bunDir, 'bun');
+  fs.writeFileSync(bun, `#!/bin/sh\nexec "${process.execPath}" "$@"\n`);
+  fs.chmodSync(bun, 0o755);
+
+  f.asar = path.join(res, 'app.asar');
+  f.asarOriginal = Buffer.from(asar);
+  return f;
+}
+
+/**
  * Where an install would land, per fixture. A test that let `setup` write to the
  * real ~/.local/bin would be installing a command on the machine that runs the
  * suite.
@@ -113,6 +165,7 @@ function toolEnv(bundle, extra = {}) {
     ...process.env,
     FREEBUFF_FOCUS_HOME: bundle.home,
     FREEBUFF_FOCUS_BIN_DIR: bundle.bin,
+    FREEBUFF_FOCUS_SESSION_DIR: bundle.home,
     FREEBUFF_FOCUS_ORIGIN: bundle.origin,
     ...extra,
   };
@@ -243,7 +296,11 @@ check('the file is byte-identical to the first patch', twice === patched);
 console.log('\nstatus after install');
 const statusPatched = run(a.app, a.backups, 'status');
 check('status still exits 0', statusPatched.status, 0);
-check('status confirms ads are off', /Ads are off/.test(statusPatched.stdout));
+// These fixtures are a bare orchestrator with no app.asar, so the window stage
+// is n/a: status must say the local auction is off without claiming the window is.
+check('status scopes the claim to the local auction', /local ad auction is off, but the window is not/.test(statusPatched.stdout));
+check('and never says ads are off outright', /Ads are off/.test(statusPatched.stdout), false);
+check('and says why the window stage is missing', /window\s+n\/a on this build/.test(statusPatched.stdout));
 
 /* ------------------------------------------------------------------- revert */
 
@@ -251,6 +308,32 @@ console.log('\nrevert');
 const revert = run(a.app, a.backups, 'revert');
 check('revert exits 0', revert.status, 0);
 check('the original bytes are restored', read(a.target) === CURRENT);
+
+/* ------------------------------------------------------- the hosted window */
+
+// 0.0.19x renders freebuff.com inside its own session, so the ads you see are
+// fetched by that page. The orchestrator patch cannot reach them; app.asar has
+// to cancel that request. These checks run the real rewrite on a real asar.
+console.log('\nthe hosted window (app.asar)');
+const shell = makeShellBundle();
+const shellInstall = run(shell.app, shell.backups, 'install');
+check('install exits 0', shellInstall.status, 0);
+check('it blocks the window as well', /blocked the ad API in app\.asar/.test(shellInstall.stdout));
+check('the asar carries the marker', fs.readFileSync(shell.asar).includes('FBD-ADS-OFF:shell'));
+check('the orchestrator is patched too', count(read(shell.target), '/*FBD-ADS-OFF:render*/'), 1);
+check('the rewritten asar still parses', fs.readFileSync(shell.asar).readUInt32LE(4) > 0);
+
+const shellStatus = run(shell.app, shell.backups, 'status');
+check('status reports the window blocked', /window\s+ad API blocked/.test(shellStatus.stdout));
+check('and only then claims ads are off', /Ads are off/.test(shellStatus.stdout));
+
+const shellAgain = run(shell.app, shell.backups, 'install');
+check('a second install is a no-op', /Already patched/.test(shellAgain.stdout));
+check('and leaves the window stage alone', /window\s+ad API blocked/.test(run(shell.app, shell.backups, 'status').stdout));
+
+run(shell.app, shell.backups, 'revert');
+check('revert restores the asar byte for byte', fs.readFileSync(shell.asar).equals(shell.asarOriginal));
+check('and the orchestrator with it', read(shell.target) === CURRENT);
 
 /* ------------------------------------------------------------ display-only */
 
@@ -603,7 +686,8 @@ check('nothing else is left in that folder', fs.readdirSync(sessionDir).length, 
 
 const plainStatus = run(s.app, s.backups, 'status', '--session-dir', sessionDir);
 check('status says only unfocus ends it', /focus\s+on - until you run/.test(plainStatus.stdout));
-check('and still reports the patch', /Ads are off/.test(plainStatus.stdout));
+check('and still reports the patch', /render\s+applied/.test(plainStatus.stdout));
+check('without claiming the window is quiet', /Ads are off/.test(plainStatus.stdout), false);
 
 const ended = run(s.app, s.backups, 'unfocus', '--session-dir', sessionDir);
 check('unfocus exits 0', ended.status, 0);
