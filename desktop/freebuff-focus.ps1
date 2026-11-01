@@ -1094,8 +1094,10 @@ The patch table - the same two anchors as the macOS tool, the same counts, and t
 same replacements, so one `scan` report re-anchors both.
 
 Each patch carries an ordered list of strategies. The first is the exact literal
-this tool was verified against. The second is a relaxation, so a Freebuff release
-that renames a function but keeps the shape does not brick the tool. A relaxation
+this tool was verified against; where a build changed that literal's shape, the
+older one is carried immediately after it, so both patch. The last is a
+relaxation, so a Freebuff release that renames a function but keeps the shape
+does not brick the tool. A relaxation
 only counts as a match when it hits the expected number of times *and* every hit
 has ad code beside it, so a decoy `if (somethingTest(process.env))` elsewhere in a
 9 MB bundle is never mistaken for the ad render path. When nothing matches
@@ -1118,13 +1120,19 @@ $Patches = @(
     Tries  = @(
       @{
         Name = 'literal'
+        Find = [regex]::new([regex]::Escape('if (localAgenticTestCampaign(process.env) || stagingAgenticTestCampaign(process.env))'))
+        Near = $null
+        Repl = 'if (true/*FBD-ADS-OFF:render*/)'
+      },
+      @{
+        Name = 'literal-prior'
         Find = [regex]::new([regex]::Escape('if (localAgenticTestCampaign(process.env))'))
         Near = $null
         Repl = 'if (true/*FBD-ADS-OFF:render*/)'
       },
       @{
         Name = 'relaxed'
-        Find = [regex]::new('\bif\s*\(\s*[A-Za-z_$][\w$]*Test[A-Za-z_$]*\s*\(\s*process\.env\s*\)\s*\)')
+        Find = [regex]::new('\bif\s*\(\s*[A-Za-z_$][\w$]*Test[A-Za-z_$]*\s*\(\s*process\.env\s*\)\s*(?:\|\|\s*[A-Za-z_$][\w$]*Test[A-Za-z_$]*\s*\(\s*process\.env\s*\)\s*)*\)')
         Near = $AdNear
         Repl = 'if (true/*FBD-ADS-OFF:render*/)'
       }

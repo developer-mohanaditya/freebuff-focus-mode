@@ -35,7 +35,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CURRENT, GATE, RENAMED, TWO_GATES, DECOY } from './desktop-fixtures.mjs';
+import { CURRENT, GATE, LEGACY, RENAMED, TWO_GATES, DECOY } from './desktop-fixtures.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOOL = path.join(ROOT, 'desktop', 'freebuff-focus-linux.sh');
@@ -369,6 +369,16 @@ check('the renamed gate is neutralised', count(read(f.target), '/*FBD-ADS-OFF:re
 check('the ad client is stubbed too', count(read(f.target), '/*FBD-ADS-OFF:request*/'), 1);
 run(f.tree, f.backups, 'revert');
 check('revert restores the renamed build exactly', read(f.target) === RENAMED, true);
+
+console.log('\n0.0.164 build (the narrower gate)');
+const f1 = makeTree(LEGACY);
+const legacyRun = run(f1.tree, f1.backups, 'install', '--no-wait');
+check('install exits 0', legacyRun.status, 0);
+check('it does not need the relaxation', /via relaxed match/.test(legacyRun.stdout), false);
+check('the older gate is neutralised', count(read(f1.target), '/*FBD-ADS-OFF:render*/'), 1);
+check('the ad client is stubbed too', count(read(f1.target), '/*FBD-ADS-OFF:request*/'), 1);
+run(f1.tree, f1.backups, 'revert');
+check('revert restores it exactly', read(f1.target) === LEGACY, true);
 
 console.log('\ndecoy gate far from ad code');
 const g = makeTree(DECOY);

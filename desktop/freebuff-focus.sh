@@ -718,20 +718,30 @@ my @patches = (
   {
     id     => 'render',
     layer  => 'display',
-    # 0.0.164 has ONE render gate. 0.0.155 had two (`displayAd` + `auction`), and
-    # the displayAd one is gone from the bundle - `scan` shows a single match for
-    # both the literal and the relaxation, in auction().
+    # One render gate, wherever it lives: 0.0.155 had two (`displayAd` +
+    # `auction`), 0.0.164 had one. 0.0.192 kept one but widened its condition to
+    # `localAgenticTestCampaign(process.env) || stagingAgenticTestCampaign(process.env)`,
+    # so the 0.0.164 literal stopped matching anywhere in the bundle and the tool
+    # refused rather than guessed. Both forms are carried - the current one
+    # first, the 0.0.164 one second - and both are unique in the builds they were
+    # taken from. The other `localAgenticTestCampaign(` calls in 0.0.192 are not
+    # `if` conditions on it, so they cannot be hit by either literal.
     what   => 'force the ad auction to return no ads',
     expect => 1,
     tries  => [
       {
         name => 'literal',
+        find => qr/\Qif (localAgenticTestCampaign(process.env) || stagingAgenticTestCampaign(process.env))\E/,
+        repl => 'if (true/*FBD-ADS-OFF:render*/)',
+      },
+      {
+        name => 'literal-prior',
         find => qr/\Qif (localAgenticTestCampaign(process.env))\E/,
         repl => 'if (true/*FBD-ADS-OFF:render*/)',
       },
       {
         name => 'relaxed',
-        find => qr/\bif\s*\(\s*[A-Za-z_\$][\w\$]*Test[A-Za-z_\$]*\s*\(\s*process\.env\s*\)\s*\)/,
+        find => qr/\bif\s*\(\s*[A-Za-z_\$][\w\$]*Test[A-Za-z_\$]*\s*\(\s*process\.env\s*\)\s*(?:\|\|\s*[A-Za-z_\$][\w\$]*Test[A-Za-z_\$]*\s*\(\s*process\.env\s*\)\s*)*\)/,
         near => $AD_NEAR,
         repl => 'if (true/*FBD-ADS-OFF:render*/)',
       },

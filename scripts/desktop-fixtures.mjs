@@ -6,11 +6,14 @@
  * anchors, and a fixture that drifted between the suites would let one of them
  * pass against a bundle the other refuses. One source, two suites.
  *
- * The shapes are taken from a real Freebuff Desktop **0.0.164** bundle, as
- * reported by `scan` on that build: one render gate inside `auction()`, the ad
+ * The shapes are taken from a real Freebuff Desktop **0.0.192** bundle, as
+ * reported by `scan` on that build: one render gate (`auction()`, whose condition
+ * 0.0.192 widened from one test-campaign check to two joined by `||`), the ad
  * client's own `request` helper, and the decoys that make the old, looser anchors
  * dangerous - six other `async request(` definitions, and two `async post(`
  * helpers, one of which is the logs shipper that POSTs to `${API_HOST}/api/logs`.
+ * 0.0.164's narrower gate is kept as LEGACY, so the literal carried for it stays
+ * covered rather than trusted.
  */
 
 export const CURRENT = [
@@ -23,7 +26,7 @@ export const CURRENT = [
   '    return this.send(method, path27, payload, timeoutMs);',
   '  }',
   '  async auction({ placementId, boundCampaignId, invitationFundingToken, invitationId, invitationFundingWorkspaceId, clientContext } = {}) {',
-  '    if (localAgenticTestCampaign(process.env)) return { ads: [] };',
+  '    if (localAgenticTestCampaign(process.env) || stagingAgenticTestCampaign(process.env)) return { ads: [] };',
   '    let displayCapability = displayLocalCapability(localCapability), capabilityAuction = displayCapability !== null;',
   '    if (!capabilityAuction) return { ads: [] };',
   '    return { ads: await this.request("POST", `/api/v1/ads/proposal/${placementId}`, {}) };',
@@ -58,10 +61,19 @@ export const CURRENT = [
   '',
 ].join('\n');
 
-export const GATE = 'if (localAgenticTestCampaign(process.env)) return { ads: [] };';
+export const GATE = 'if (localAgenticTestCampaign(process.env) || stagingAgenticTestCampaign(process.env)) return { ads: [] };';
 
 /** The same build one Release later: the gate renamed, the shape unchanged. */
 export const RENAMED = CURRENT.replace(GATE, 'if (agenticTestCampaign(process.env)) return { ads: [] };');
+
+/**
+ * 0.0.164, which narrowed the condition to the local campaign alone. The tool
+ * still carries that literal, so it still has to patch this build.
+ */
+export const LEGACY = CURRENT.replace(
+  GATE,
+  'if (localAgenticTestCampaign(process.env)) return { ads: [] };'
+);
 
 /**
  * A build that still has TWO gates, the way 0.0.155 did. `render` now expects

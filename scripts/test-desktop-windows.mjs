@@ -29,7 +29,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CURRENT, GATE, RENAMED, TWO_GATES, DECOY } from './desktop-fixtures.mjs';
+import { CURRENT, GATE, LEGACY, RENAMED, TWO_GATES, DECOY } from './desktop-fixtures.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOOL = path.join(ROOT, 'desktop', 'freebuff-focus.ps1');
@@ -369,6 +369,20 @@ check('the renamed gate text is gone', relaxed.includes('agenticTestCampaign(pro
 check('the ad client is stubbed too', count(relaxed, '/*FBD-ADS-OFF:request*/'), 1);
 run(g.app, g.backups, 'revert');
 check('revert restores the renamed build exactly', read(g.target) === RENAMED);
+
+/* ------------------------------------------------------------ older build */
+
+// 0.0.164's narrower gate, which the tool still carries a literal for. It must
+// patch without falling through to the relaxation.
+console.log('\n0.0.164 build (the narrower gate)');
+const g1 = makeInstall(LEGACY);
+const legacyInstall = run(g1.app, g1.backups, 'install');
+check('install exits 0', legacyInstall.status, 0);
+check('it does not need the relaxation', /via relaxed match/.test(legacyInstall.stdout), false);
+check('the older gate is neutralised', count(read(g1.target), '/*FBD-ADS-OFF:render*/'), 1);
+check('the ad client is stubbed too', count(read(g1.target), '/*FBD-ADS-OFF:request*/'), 1);
+run(g1.app, g1.backups, 'revert');
+check('revert restores it exactly', read(g1.target) === LEGACY);
 
 /* -------------------------------------------------------------------- decoy */
 
