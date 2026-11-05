@@ -60,7 +60,7 @@
 set -u
 
 # Stamped at build time (scripts/build-desktop.mjs).
-VERSION="1.9.5"
+VERSION="1.9.6"
 # The test suite points this at a file:// copy so update can be exercised without
 # the network. Nothing else sets it.
 ORIGIN="${FREEBUFF_FOCUS_ORIGIN:-https://freebuff-focusmode.vercel.app}"
@@ -353,8 +353,23 @@ wait_app() {
   app="$1"; secs="${2:-20}"
   waited=0
   while :; do
-    [ -n "$(orchestrator_pids "$app")" ] && return 0
-    [ -n "$(app_pids "$app")" ] && return 0
+    alive=0
+    [ -n "$(orchestrator_pids "$app")" ] && alive=1
+    [ -n "$(app_pids "$app")" ] && alive=1
+    if [ "$alive" = "1" ]; then
+      # A process that appears and is gone a moment later is a launch that dies
+      # while loading, which is what "it closes and never comes back" looks like
+      # from outside. Treating the first sighting as success would call that a
+      # restart and leave the reader with nothing.
+      grace="${FREEBUFF_FOCUS_GRACE_SECS:-3}"
+      [ "$grace" = "0" ] && return 0
+      sleep "$grace"
+      if [ -n "$(orchestrator_pids "$app")" ] || [ -n "$(app_pids "$app")" ]; then
+        return 0
+      fi
+      waited=$(( waited + grace ))
+      continue
+    fi
     [ "$waited" -ge "$secs" ] && return 1
     sleep 1; waited=$(( waited + 1 ))
   done
@@ -460,15 +475,37 @@ rescue_app() {
     say "  The app's own output is kept in $(launch_log)"
     return 0
   fi
-  # fallthrough: not this tool's stage that stopped it, so nothing is undone.
   printf '%s\n' "${reason:-it exited without a message}" > "$SESSION_DIR/launch.failed" 2>/dev/null || true
-  warn "Freebuff did not start, and app.asar was not rolled back"
+  if [ "$patched" = "1" ]; then
+    # The backup is what makes the rollback possible, and only one keyed to the
+    # version now installed is a copy of these bytes. Without it there is nothing
+    # safe to put back, so say so instead of leaving the reader with a dead app
+    # and no next step.
+    warn "Freebuff did not start, and the window stage could not be put back"
+    [ -n "$reason" ] && say "  Freebuff said: ${DIM}$reason${OFF}"
+    say "  There is no pristine app.asar.$version.orig in $BACKUP_DIR."
+    if [ -d "$BACKUP_DIR" ]; then
+      for f in "$BACKUP_DIR"/app.asar.*.orig; do
+        [ -f "$f" ] && say "  ${DIM}(a backup for another version is there: $f)${OFF}"
+      done
+    fi
+    say "  Put the official build back and Freebuff will start:"
+    say "    https://freebuff.com/desktop"
+    say "  Then run: $(cmdname) install - it keeps the backup it needs from then on."
+    say "  The app's own output is kept in $(launch_log)"
+    return 1
+  fi
+  # fallthrough: not this tool's stage that stopped it, so nothing is undone.
+  warn "Freebuff did not start, and nothing this tool wrote was rolled back"
   if [ -n "$reason" ]; then
     say "  Freebuff said: ${DIM}$reason${OFF}"
   else
+    bin="$(app_binary "$app" 2>/dev/null)"
     say "  It printed nothing. Start it by hand to see why:"
-    say "    $app/Contents/MacOS/"
+    say "    ${bin:-$app/Contents/MacOS/Freebuff}"
   fi
+  say "  If it still will not open, put the pristine files back: $(cmdname) revert"
+  say "  The app's own output is kept in $(launch_log)"
   return 1
 }
 # Nothing is running and the window stage is in the bundle, so the one thing a

@@ -1125,6 +1125,14 @@ check('app.asar is put back byte for byte', fs.readFileSync(wontStart.asar).equa
 check('and Info.plist with it', read(wontStart.plist), wontStart.plistOriginal);
 check('the failure is kept for status', /last start of Freebuff failed/.test(startRun(wontStart, 'status').stdout));
 
+const flashes = makeStartBundle(
+  'sleep 1\necho "Error: Unable to load preload script: hosted-preload.cjs" >&2\nexit 3'
+);
+const flashesRun = startRun(flashes, 'install', '--restart', '--no-wait');
+check('a launch that dies a second in is not a start', /started Freebuff/.test(flashesRun.stdout), false);
+check('and it is rolled back like any other refusal', /would not start with the window stage applied/.test(flashesRun.stdout));
+check('with the pristine app.asar back', fs.readFileSync(flashes.asar).equals(flashes.asarOriginal));
+
 const starts = makeStartBundle('sleep 5');
 const startsRun = startRun(starts, 'install', '--restart', '--no-wait');
 check('a bundle that starts is started and said so', /started Freebuff/.test(startsRun.stdout));
