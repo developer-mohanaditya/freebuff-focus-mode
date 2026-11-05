@@ -1203,14 +1203,16 @@ cmd_help() {
 # The window you actually look at is not the local UI. 0.0.19x opens
 # freebuff.com inside Electron, in its own session (app.asar ->
 # electron/hosted-workspace.cjs), and that page fetches its ads from the site.
-# Nothing in orchestrator.js can reach them. This stage rewrites app.asar so the
-# hosted session cancels the ad API before any card can arrive.
+# Nothing in orchestrator.js can reach them. This stage rewrites app.asar twice
+# over: the hosted session cancels the ad API before a card can be fetched, and
+# the page's preload hides the cards that were already in the document.
 #
 # app.asar is rewritten by its own bundled bun - no npm, no asar package, no
-# network. Only electron/hosted-workspace.cjs changes; every other entry is
-# copied byte for byte and the asar integrity hashes are recomputed.
+# network. Only electron/hosted-workspace.cjs and electron/hosted-preload.cjs
+# change; every other entry is copied byte for byte and the asar integrity
+# hashes are recomputed.
 
-SHELL_JS_TAG='v3'
+SHELL_JS_TAG='v4'
 
 shell_js_path() {
   mkdir -p "$SESSION_DIR" 2>/dev/null || return 1
@@ -1231,6 +1233,50 @@ const PREV = '/*FBD-ADS-OFF:shell*/';
 const OLD = 'hostedSession.webRequest.onBeforeRequest(null)';
 const PATHS = '/^\\/api\\/(?:ads?(?:\\/|$)|web\\/ads(?:\\/|$)|ad-|sponsored-|google-ads(?:\\/|$)|advertiser|meta\\/ads-|telemetry\\/ad-)/i';
 const NEW = 'hostedSession.webRequest.onBeforeRequest((_d,_c)=>{let p=_d.url;try{p=new URL(_d.url).pathname}catch(e){}return _c({cancel:' + PATHS + '.test(p)})})' + MARK;
+const PAGE_MARK = '/*FBD-ADS-OFF:dom-v1*/';
+const PAGE_ANCHOR = "contextBridge.exposeInMainWorld('freebuffHost'";
+// Cancelling the ad API stops cards being fetched, but a card the server already
+// put in the document has no request left to cancel. So the page hides ad nodes as
+// well, by the attributes the site marks them with. Inline styles rather than a
+// <style> element: a CSP style-src would drop the element, never the CSSOM.
+const PAGE = [
+  // The file ends in a call expression with no semicolon, so a bare IIFE after it
+  // would be read as another call of that expression.
+  '',
+  ';',
+  '// ' + PAGE_MARK + ' Hidden before paint and again on every render, because a card',
+  '// can arrive inside a response that was already under way.',
+  '(function () {',
+  '  try {',
+  '    var AD = \'[data-gravity-ad],[data-ad-slot],[aria-label*="(Ad)"],[class*="gravity-ad"],[class*="partner-placement"]\';',
+  '    function hide(node) { try { node.style.setProperty(\'display\', \'none\', \'important\') } catch (e) {} }',
+  '    function sweep() {',
+  '      var ads = document.querySelectorAll(AD);',
+  '      for (var i = 0; i < ads.length; i++) {',
+  '        var node = ads[i];',
+  '        // A wrapper that holds nothing but the ad goes too, or it leaves a gap.',
+  '        for (var up = 0; up < 3; up++) {',
+  '          var parent = node.parentElement;',
+  '          if (!parent || parent === document.body || parent === document.documentElement) break;',
+  '          if (parent.children.length > 1) break;',
+  '          if ((parent.textContent || \'\').trim() !== (node.textContent || \'\').trim()) break;',
+  '          node = parent;',
+  '        }',
+  '        hide(node);',
+  '      }',
+  '    }',
+  '    sweep();',
+  '    document.addEventListener(\'DOMContentLoaded\', sweep, { once: true });',
+  '    var queued = false;',
+  '    new MutationObserver(function () {',
+  '      if (queued) return;',
+  '      queued = true;',
+  '      setTimeout(function () { queued = false; sweep() }, 50);',
+  '    }).observe(document, { childList: true, subtree: true });',
+  '  } catch (e) {}',
+  '})();',
+  '',
+].join('\n');
 function readAsar(p) {
   const buf = fs.readFileSync(p);
   if (buf.length < 16) throw new Error('not an asar');
@@ -1304,32 +1350,50 @@ function main(argv) {
   if (mode === 'hash') { console.log(headerHash(buf, jlen)); return; }
   const files = walk(header, '', []);
   const read = (f) => buf.slice(base + Number(f.entry.offset), base + Number(f.entry.offset) + Number(f.entry.size));
-  const target = files.find((f) => f.path === 'electron/hosted-workspace.cjs');
-  if (!target) throw new Error('hosted-workspace.cjs not found');
-  const text = read(target).toString('utf8');
-  const patched = text.includes(MARK);
+  const shell = files.find((f) => f.path === 'electron/hosted-workspace.cjs');
+  if (!shell) throw new Error('hosted-workspace.cjs not found');
+  const shellText = read(shell).toString('utf8');
+  const shellDone = shellText.includes(MARK);
+  // Older builds have no preload beside the window, so an absent file is not a
+  // failure: there is simply nothing in the document to hide.
+  const page = files.find((f) => f.path === 'electron/hosted-preload.cjs');
+  const pageText = page ? read(page).toString('utf8') : null;
+  const pageDone = page ? pageText.includes(PAGE_MARK) : true;
   if (mode === 'check') {
-    console.log(JSON.stringify({ patched, stale: !patched && text.includes(PREV), anchor: text.includes(OLD), files: files.length }));
+    console.log(JSON.stringify({
+      shell: shellDone, page: pageDone, patched: shellDone && pageDone,
+      stale: !shellDone && shellText.includes(PREV),
+      anchor: shellText.includes(OLD), pageFile: !!page, files: files.length,
+    }));
     return;
   }
-  if (patched) { console.log('already patched'); return; }
-  if (!text.includes(OLD)) throw new Error(text.includes(PREV) ? 'previous block present' : 'anchor not found');
-  const nextBuf = Buffer.from(text.replace(OLD, NEW), 'utf8');
-  if (target.entry.integrity) {
-    const blockSize = target.entry.integrity.blockSize || 4194304;
-    const blocks = [];
-    for (let i = 0; i < nextBuf.length; i += blockSize) {
-      blocks.push(crypto.createHash('sha256').update(nextBuf.slice(i, i + blockSize)).digest('hex'));
-    }
-    target.entry.integrity.hash = crypto.createHash('sha256').update(nextBuf).digest('hex');
-    target.entry.integrity.blocks = blocks;
+  if (shellDone && pageDone) { console.log('already patched'); return; }
+  const next = new Map();
+  if (!shellDone) {
+    if (!shellText.includes(OLD)) throw new Error(shellText.includes(PREV) ? 'previous block present' : 'anchor not found');
+    next.set(shell, Buffer.from(shellText.replace(OLD, NEW), 'utf8'));
   }
-  target.entry.size = nextBuf.length;
+  if (!pageDone) {
+    if (!pageText.includes(PAGE_ANCHOR)) throw new Error('the page preload is not what this build ships');
+    next.set(page, Buffer.from(pageText + PAGE, 'utf8'));
+  }
+  for (const [target, body] of next) {
+    if (target.entry.integrity) {
+      const blockSize = target.entry.integrity.blockSize || 4194304;
+      const blocks = [];
+      for (let i = 0; i < body.length; i += blockSize) {
+        blocks.push(crypto.createHash('sha256').update(body.slice(i, i + blockSize)).digest('hex'));
+      }
+      target.entry.integrity.hash = crypto.createHash('sha256').update(body).digest('hex');
+      target.entry.integrity.blocks = blocks;
+    }
+    target.entry.size = body.length;
+  }
   let offset = 0;
   const parts = [];
   for (const f of files) {
     if (f.entry.unpacked) continue;
-    const body = f === target ? nextBuf : read(f);
+    const body = next.get(f) || read(f);
     f.entry.offset = String(offset);
     offset += body.length;
     parts.push(body);
@@ -1345,7 +1409,7 @@ function main(argv) {
   const out = Buffer.concat([head, json, Buffer.alloc(pad), ...parts]);
   fs.writeFileSync(asarPath + '.fbd-tmp', out);
   fs.renameSync(asarPath + '.fbd-tmp', asarPath);
-  console.log(JSON.stringify({ patched: true, size: out.length, files: files.length, hash: headerHash(out, newJlen) }));
+  console.log(JSON.stringify({ patched: true, shell: !shellDone, page: !pageDone, size: out.length, files: files.length, hash: headerHash(out, newJlen) }));
 }
 main(process.argv.slice(2));
 FBD_SHELL_JS
@@ -1423,6 +1487,7 @@ shell_state() {
   js="$(shell_js_path)" || { printf 'unsupported\n'; return 0; }
   out="$("$bun" "$js" check "$asar" 2>/dev/null)" || { printf 'unsupported\n'; return 0; }
   case "$out" in
+    *'"shell":true,"page":false'*) printf 'partial\n' ;;
     *'"patched":true'*) printf 'patched\n' ;;
     *'"stale":true'*) printf 'stale\n' ;;
     *'"patched":false'*) printf 'unpatched\n' ;;
@@ -1452,6 +1517,8 @@ shell_apply() {
       say "  window   older block found - replacing it" ;;
     patched)
       ok "window   the ad API is already blocked in app.asar" ;;
+    partial)
+      say "  window   the request block is in place, the page hide is not - adding it" ;;
   esac
   if [ "$state" != "patched" ]; then
     bun="$(shell_bun "$app")"; js="$(shell_js_path)" || return 1
@@ -1541,7 +1608,8 @@ cmd_status() {
   # A case inside $( ) trips the bash 3.2 that macOS ships as /bin/sh, so the
   # label is chosen first and printed after.
   case "$window_state" in
-    patched) window_note="ad API blocked (app.asar)" ;;
+    patched) window_note="ad API blocked and ad cards hidden (app.asar)" ;;
+    partial) window_note="ad API blocked, ad cards not hidden yet - run: $(cmdname) install" ;;
     stale) window_note="older block - run: $(cmdname) install" ;;
     unpatched) window_note="not blocked - run: $(cmdname) install" ;;
     *) window_note="n/a on this build" ;;

@@ -17,6 +17,6 @@
 -->
 <gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
   <app appid='YOUR_EXTENSION_ID_HERE'>
-    <updatecheck codebase='https://freebuff-focusmode.vercel.app/downloads/freebuff-focus-1.9.3.zip' version='1.9.3' />
+    <updatecheck codebase='https://freebuff-focusmode.vercel.app/downloads/freebuff-focus-1.9.4.zip' version='1.9.4' />
   </app>
 </gupdate>

@@ -116,22 +116,31 @@ const SHELL_HW =
   'hostedSession = { webRequest: { onBeforeRequest: (fn) => { current = fn } } }\n' +
   'hostedSession.webRequest.onBeforeRequest(null)\nmodule.exports = {}\n';
 
-function buildAsar(hwText) {
-  const hw = Buffer.from(hwText);
-  const sha = crypto.createHash('sha256').update(hw).digest('hex');
-  const header = {
-    files: {
-      electron: {
-        files: {
-          'hosted-workspace.cjs': {
-            size: hw.length,
-            offset: '0',
-            integrity: { algorithm: 'SHA256', hash: sha, blockSize: 4194304, blocks: [sha] },
-          },
-        },
-      },
-    },
+const SHELL_PRELOAD =
+  "'use strict'\n" +
+  "const { contextBridge } = require('electron')\n" +
+  "contextBridge.exposeInMainWorld('freebuffHost', { ready: () => 1 })\n";
+
+function buildAsar(hwText, preloadText = SHELL_PRELOAD) {
+  const blobs = [
+    ['hosted-workspace.cjs', Buffer.from(hwText)],
+    ['hosted-preload.cjs', Buffer.from(preloadText)],
+  ];
+  const entry = (body, offset) => {
+    const sha = crypto.createHash('sha256').update(body).digest('hex');
+    return {
+      size: body.length,
+      offset: String(offset),
+      integrity: { algorithm: 'SHA256', hash: sha, blockSize: 4194304, blocks: [sha] },
+    };
   };
+  const files = {};
+  let offset = 0;
+  for (const [name, body] of blobs) {
+    files[name] = entry(body, offset);
+    offset += body.length;
+  }
+  const header = { files: { electron: { files } } };
   const json = Buffer.from(JSON.stringify(header));
   const pad = (4 - (json.length % 4)) % 4;
   const jlen = json.length + pad;
@@ -140,7 +149,17 @@ function buildAsar(hwText) {
   head.writeUInt32LE(jlen + 8, 4);
   head.writeUInt32LE(jlen + 4, 8);
   head.writeUInt32LE(jlen, 12);
-  return Buffer.concat([head, json, Buffer.alloc(pad), hw]);
+  return Buffer.concat([head, json, Buffer.alloc(pad), ...blobs.map(([, body]) => body)]);
+}
+
+/** One file out of a fixture asar, by path inside it. */
+function asarFile(asar, wanted) {
+  const jlen = asar.readUInt32LE(12);
+  const header = JSON.parse(asar.slice(16, 16 + jlen).toString('utf8').replace(/\0+$/, '').trimEnd());
+  const base = 8 + asar.readUInt32LE(4);
+  const entry = header.files.electron.files[wanted];
+  if (!entry) return null;
+  return asar.slice(base + Number(entry.offset), base + Number(entry.offset) + Number(entry.size));
 }
 
 function makeShellBundle(body = CURRENT, hwSource = SHELL_HW) {
@@ -395,6 +414,35 @@ check('the rewritten asar still parses', fs.readFileSync(shell.asar).readUInt32L
 // 1.9.0 blocked /api/ad/* only, which is the offer flow; the card above the
 // composer comes from /api/web/ads/proposal, so the block has to cover it.
 check('it blocks the composer ad endpoint', fs.readFileSync(shell.asar, 'utf8').includes('/api\\/(?:ads?('));
+// A card the server already put in the document has no request left to cancel,
+// so the page preload hides ad nodes by the attributes the site marks them with.
+const shellPreload = asarFile(fs.readFileSync(shell.asar), 'hosted-preload.cjs').toString('utf8');
+check('the page preload carries the hide', shellPreload.includes('FBD-ADS-OFF:dom-v1'));
+check('it hides the gravity ad nodes', shellPreload.includes('[data-gravity-ad]'));
+check('it keeps the preload\'s own code intact', shellPreload.startsWith(SHELL_PRELOAD));
+{
+  const probe = path.join(shell.root, 'preload-check.cjs');
+  fs.writeFileSync(probe, shellPreload);
+  const syntax = spawnSync(process.execPath, ['--check', probe], { encoding: 'utf8' });
+  check('the patched preload parses', syntax.status, 0);
+}
+check('the workspace file still has the request block', asarFile(fs.readFileSync(shell.asar), 'hosted-workspace.cjs').toString('utf8').includes('FBD-ADS-OFF:shell-v2'));
+
+// 1.9.3 left the request block in place without the page hide. install has to
+// notice that gap and add it rather than call the build done.
+console.log('\nupgrading an install that has only the request block');
+const halfPatched = buildAsar(
+  'hostedSession = { webRequest: { onBeforeRequest: (fn) => { current = fn } } }\n' +
+  'hostedSession.webRequest.onBeforeRequest((_d,_c)=>_c({cancel:true}))/*FBD-ADS-OFF:shell-v2*/\n' +
+  'module.exports = {}\n'
+);
+const half = makeShellBundle();
+fs.writeFileSync(half.asar, halfPatched);
+check('status names the gap', /ad cards not hidden yet/.test(run(half.app, half.backups, 'status').stdout));
+const halfInstall = run(half.app, half.backups, 'install');
+check('install adds the page hide', /page hide/.test(halfInstall.stdout));
+check('and the marker is in the asar', fs.readFileSync(half.asar, 'utf8').includes('FBD-ADS-OFF:dom-v1'));
+check('status is clean again', /ad API blocked and ad cards hidden/.test(run(half.app, half.backups, 'status').stdout));
 
 const shellStatus = run(shell.app, shell.backups, 'status');
 check('status reports the window blocked', /window\s+ad API blocked/.test(shellStatus.stdout));
