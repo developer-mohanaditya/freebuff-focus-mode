@@ -168,26 +168,18 @@ function headerHashOf(asar) {
 }
 
 /**
- * Stand-in for /usr/libexec/PlistBuddy, which only exists on macOS. It answers
- * the two commands the tool uses on the one key it touches; everything else is
- * left to the real binary on a real machine.
+ * Stand-in for macOS plutil, which only exists there. The tool only asks it to
+ * hand a plist over as XML and to write one back, so those two forms are all
+ * this needs to support; the fixture plists are already XML.
  */
-const PLISTBUDDY_SHIM = `#!${process.execPath}
+const PLUTIL_SHIM = `#!${process.execPath}
 const fs = require('fs');
 const args = process.argv.slice(2);
-const cmd = args[args.indexOf('-c') + 1];
+const out = args[args.indexOf('-o') + 1];
 const file = args[args.length - 1];
-const [keypath, ...value] = cmd.slice(cmd.indexOf(' ') + 1).split(' ');
-const leaf = keypath.split(':').filter(Boolean).pop();
-let text = fs.readFileSync(file, 'utf8');
-if (cmd.startsWith('Print')) {
-  const m = text.match(new RegExp('<key>' + leaf + '</key>[^<]*<string>([^<]*)</string>'));
-  if (!m) process.exit(1);
-  console.log(m[1]);
-} else if (cmd.startsWith('Set')) {
-  text = text.replace(new RegExp('(<key>' + leaf + '</key>[^<]*<string>)[^<]*(</string>)'), '$1' + value.join(' ') + '$2');
-  fs.writeFileSync(file, text);
-} else process.exit(2);
+const text = fs.readFileSync(file, 'utf8');
+if (out === '-') process.stdout.write(text);
+else fs.writeFileSync(out, text);
 `;
 
 /**
@@ -217,9 +209,9 @@ function addAsarIntegrity(f, recorded) {
   f.plist = path.join(f.app, 'Contents', 'Info.plist');
   fs.writeFileSync(f.plist, plist);
   f.plistOriginal = plist;
-  f.plistbuddy = path.join(f.root, 'PlistBuddy');
-  fs.writeFileSync(f.plistbuddy, PLISTBUDDY_SHIM);
-  fs.chmodSync(f.plistbuddy, 0o755);
+  f.plutil = path.join(f.root, 'plutil');
+  fs.writeFileSync(f.plutil, PLUTIL_SHIM);
+  fs.chmodSync(f.plutil, 0o755);
   return f;
 }
 
@@ -440,7 +432,7 @@ check('and revert still restores the pristine bytes', fs.readFileSync(upgrade.as
 // by making the app unlaunchable, which is what 1.9.1 did on 0.0.200.
 console.log('\nthe asar integrity fuse (0.0.200)');
 const fused = addAsarIntegrity(makeShellBundle());
-const fusedEnv = { FREEBUFF_FOCUS_PLISTBUDDY: fused.plistbuddy };
+const fusedEnv = { FREEBUFF_FOCUS_PLUTIL: fused.plutil };
 const fusedInstall = runWith(fusedEnv, fused.app, fused.backups, 'install');
 check('install exits 0', fusedInstall.status, 0);
 check('it says it moved the recorded hash', /app\.asar hash updated in Info\.plist/.test(fusedInstall.stdout));
@@ -466,6 +458,17 @@ const noFuse = makeShellBundle();
 const noFuseInstall = run(noFuse.app, noFuse.backups, 'install');
 check('a build without the key still installs', /blocked the ad API/.test(noFuseInstall.stdout));
 check('and no Info.plist is written', fs.existsSync(path.join(noFuse.app, 'Contents', 'Info.plist')), false);
+
+// The failure that shipped in 1.9.2: the plist cannot be read at all. That is
+// not the same as "this build has no fuse", and the block must not be left in
+// place on a guess - an app that will not start is worse than ads.
+const blind = addAsarIntegrity(makeShellBundle());
+const blindEnv = { FREEBUFF_FOCUS_PLUTIL: path.join(blind.root, 'no-such-plutil') };
+const blindInstall = runWith(blindEnv, blind.app, blind.backups, 'install');
+check('an unreadable plist does not count as verified', /hash updated in Info\.plist/.test(blindInstall.stdout), false);
+check('and the block is taken back out', fs.readFileSync(blind.asar).equals(blind.asarOriginal));
+check('it says why', /could not update it/.test(blindInstall.stdout));
+check('status calls that unreadable, not verified', /could not be read/.test(runWith(blindEnv, blind.app, blind.backups, 'status').stdout));
 
 /* ------------------------------------------------------------ display-only */
 

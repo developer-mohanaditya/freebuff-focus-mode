@@ -1225,6 +1225,7 @@ shell_js_path() {
 'use strict';
 const fs = require('fs');
 const crypto = require('crypto');
+const { spawnSync } = require('child_process');
 const MARK = '/*FBD-ADS-OFF:shell-v2*/';
 const PREV = '/*FBD-ADS-OFF:shell*/';
 const OLD = 'hostedSession.webRequest.onBeforeRequest(null)';
@@ -1252,8 +1253,53 @@ function walk(node, prefix, out) {
   }
   return out;
 }
+// The plist key Electron records a hash under. It contains a slash and a dot,
+// which PlistBuddy reads as path separators, so the plist is edited through
+// plutil's XML form instead of by key path.
+const ASAR_KEY = 'Resources/app.asar';
+const PLUTIL = process.env.FREEBUFF_FOCUS_PLUTIL || 'plutil';
+function plutil(args) {
+  const run = spawnSync(PLUTIL, args, { encoding: 'utf8' });
+  if (run.error) throw new Error('plutil is not available');
+  if (run.status !== 0) throw new Error((run.stderr || 'plutil failed').trim().split('\n')[0]);
+  return run.stdout;
+}
+const plistXml = (file) => plutil(['-convert', 'xml1', '-o', '-', file]);
+// Where the recorded hash sits in that XML, and what it says. found:false means
+// this build has no asar-integrity fuse at all.
+function recordedHash(xml) {
+  const at = xml.indexOf('<key>ElectronAsarIntegrity</key>');
+  if (at < 0) return { found: false };
+  const key = xml.indexOf('<key>' + ASAR_KEY + '</key>', at);
+  if (key < 0) return { found: false };
+  const hk = xml.indexOf('<key>hash</key>', key);
+  if (hk < 0) throw new Error('the asar entry in Info.plist records no hash');
+  const start = xml.indexOf('<string>', hk);
+  const end = xml.indexOf('</string>', start);
+  if (start < 0 || end < 0) throw new Error('the asar hash in Info.plist is not a string');
+  return { found: true, value: xml.slice(start + 8, end), start: start + 8, end };
+}
+// Read the recorded hash ('-' when the build records none), or replace it and
+// read back to prove the write landed.
+function plistMode(file, value) {
+  const xml = plistXml(file);
+  const seen = recordedHash(xml);
+  if (!seen.found) { console.log('-'); return; }
+  if (value === undefined || value === '-') { console.log(seen.value); return; }
+  const mode = fs.statSync(file).mode;
+  const xmlTmp = file + '.fbd-xml', outTmp = file + '.fbd-new';
+  fs.writeFileSync(xmlTmp, xml.slice(0, seen.start) + value + xml.slice(seen.end));
+  plutil(['-convert', 'binary1', '-o', outTmp, xmlTmp]);
+  fs.chmodSync(outTmp, mode & 0o7777);
+  fs.renameSync(outTmp, file);
+  fs.rmSync(xmlTmp, { force: true });
+  const after = recordedHash(plistXml(file));
+  if (!after.found || after.value !== value) throw new Error('the new hash did not stay written');
+  console.log('ok');
+}
 function main(argv) {
   const mode = argv[0], asarPath = argv[1];
+  if (mode === 'plist') { plistMode(asarPath, argv[2]); return; }
   const { buf, header, jlen, base } = readAsar(asarPath);
   if (mode === 'hash') { console.log(headerHash(buf, jlen)); return; }
   const files = walk(header, '', []);
@@ -1321,15 +1367,18 @@ shell_bun() {
 # 0.0.200 ships an asar-integrity fuse: Info.plist records the SHA256 of the
 # app.asar header, and Electron refuses to start when the two disagree. Any
 # rewrite of app.asar changes that header, so the recorded hash has to follow
-# or the app silently stops launching. PlistBuddy takes a : path, so the dots
-# and slashes in "Resources/app.asar" need no escaping.
-PLISTBUDDY="${FREEBUFF_FOCUS_PLISTBUDDY:-/usr/libexec/PlistBuddy}"
+# or the app silently stops launching. The key is called "Resources/app.asar",
+# and PlistBuddy reads both / and : as path separators, so the plist is edited
+# through plutil's XML form by the embedded JS rather than by key path.
 
-# The hash this build records for app.asar, empty when it records none.
+# The hash this build records for app.asar: '-' when it records none, a failure
+# when the plist could not be read at all.
 plist_hash() {
-  plist="$1/Contents/Info.plist"
-  [ -f "$plist" ] && [ -x "$PLISTBUDDY" ] || return 1
-  "$PLISTBUDDY" -c "Print :ElectronAsarIntegrity:Resources/app.asar:hash" "$plist" 2>/dev/null
+  app="$1"
+  [ -f "$app/Contents/Info.plist" ] || { printf -- '-\n'; return 0; }
+  bun="$(shell_bun "$app")" || return 1
+  js="$(shell_js_path)" || return 1
+  "$bun" "$js" plist "$app/Contents/Info.plist" 2>/dev/null || return 1
 }
 
 shell_asar_hash() {
@@ -1338,9 +1387,12 @@ shell_asar_hash() {
   "$bun" "$js" hash "$1/Contents/Resources/app.asar" 2>/dev/null
 }
 
-# ok | mismatch | none (this build does not check) | unknown
+# ok | mismatch | none (this build does not check) | unknown (cannot tell)
+# 'unknown' is not 'none': a plist that cannot be read must never be reported as
+# a build without the fuse, or an unreadable hash looks like a safe one.
 shell_integrity() {
-  want="$(plist_hash "$1")" || { printf 'none\n'; return 0; }
+  want="$(plist_hash "$1")" || { printf 'unknown\n'; return 0; }
+  [ "$want" = "-" ] && { printf 'none\n'; return 0; }
   got="$(shell_asar_hash "$1")" || { printf 'unknown\n'; return 0; }
   if [ -n "$want" ] && [ "$want" = "$got" ]; then
     printf 'ok\n'
@@ -1352,10 +1404,13 @@ shell_integrity() {
 # ok | updated | none | failed
 shell_sync_integrity() {
   app="$1"; plist="$app/Contents/Info.plist"
-  want="$(plist_hash "$app")" || { printf 'none\n'; return 0; }
+  want="$(plist_hash "$app")" || { printf 'failed\n'; return 0; }
+  [ "$want" = "-" ] && { printf 'none\n'; return 0; }
   got="$(shell_asar_hash "$app")" || { printf 'failed\n'; return 0; }
   [ "$want" = "$got" ] && { printf 'ok\n'; return 0; }
-  "$PLISTBUDDY" -c "Set :ElectronAsarIntegrity:Resources/app.asar:hash $got" "$plist" >/dev/null 2>&1 \
+  bun="$(shell_bun "$app")" || { printf 'failed\n'; return 0; }
+  js="$(shell_js_path)" || { printf 'failed\n'; return 0; }
+  "$bun" "$js" plist "$plist" "$got" >/dev/null 2>&1 \
     || { printf 'failed\n'; return 0; }
   [ "$(plist_hash "$app")" = "$got" ] && printf 'updated\n' || printf 'failed\n'
 }
@@ -1419,10 +1474,8 @@ shell_apply() {
   fi
   # Keep Info.plist's copy of the asar hash in step, and keep the original bytes
   # so revert can put back a file that still describes the pristine asar.
-  if plist_hash "$app" >/dev/null 2>&1; then
-    if [ ! -f "$plist_backup" ] && [ -f "$plist" ]; then
-      cp "$plist" "$plist_backup" 2>/dev/null || true
-    fi
+  if [ ! -f "$plist_backup" ] && [ -f "$plist" ]; then
+    cp "$plist" "$plist_backup" 2>/dev/null || true
   fi
   integrity="$(shell_sync_integrity "$app")"
   case "$integrity" in
@@ -1496,6 +1549,7 @@ cmd_status() {
   case "$integrity_state" in
     ok) window_note="$window_note, hash verified" ;;
     mismatch) window_note="$window_note, but Info.plist's asar hash is stale - Freebuff will not start; run: $(cmdname) install" ;;
+    unknown) window_note="$window_note, but Info.plist's asar hash could not be read - the app may not start; run: $(cmdname) install" ;;
   esac
   say "  window   $window_note"
 
@@ -1506,6 +1560,10 @@ cmd_status() {
         say "  ${YELLOW}The block is written, but Info.plist's copy of the app.asar hash is stale.${OFF}"
         say "  macOS builds from 0.0.200 on verify that hash and refuse to start, so"
         say "  Freebuff will not open until it is updated. Run: $(cmdname) install"
+        return 0
+      elif [ "$window_state" = "patched" ] && [ "$integrity_state" = "unknown" ]; then
+        say "  ${YELLOW}The block is written, but the asar hash in Info.plist could not be read.${OFF}"
+        say "  A build that verifies it will refuse to start. Run: $(cmdname) install"
         return 0
       elif [ "$window_state" = "patched" ]; then
         say "  ${GREEN}Ads are off.${OFF} Quit Freebuff and reopen it, then check what it loaded:"
