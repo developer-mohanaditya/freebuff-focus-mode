@@ -1133,6 +1133,22 @@ check('a launch that dies a second in is not a start', /started Freebuff/.test(f
 check('and it is rolled back like any other refusal', /would not start with the window stage applied/.test(flashesRun.stdout));
 check('with the pristine app.asar back', fs.readFileSync(flashes.asar).equals(flashes.asarOriginal));
 
+// A bundle that refuses one half of the window stage and takes the other: the
+// only way to tell the tool which half it minds is to start it with each.
+const bisect = makeStartBundle(
+  [
+    'asar="$(cd "$(dirname "$0")/../Resources" 2>/dev/null && pwd)/app.asar"',
+    'if grep -qa "FBD-ADS-OFF:dom-v1" "$asar" 2>/dev/null; then echo "Error: unable to load preload script" >&2; exit 7; fi',
+    'sleep 5',
+  ].join('\n')
+);
+startRun(bisect, 'install', '--no-restart');
+const bisectRun = startRun(bisect, 'diagnose');
+check('diagnose starts the bundle with none of the patch in place', /started\s+Freebuff's own files/.test(bisectRun.stdout));
+check('diagnose starts it with the API block alone', /started\s+the ad API block alone/.test(bisectRun.stdout));
+check('diagnose names the card hide as the half that stops it', /The ad card hide\s+is what stops Freebuff from starting/.test(bisectRun.stdout));
+check('diagnose leaves the shipped app.asar behind', fs.readFileSync(bisect.asar).equals(bisect.asarOriginal));
+
 const starts = makeStartBundle('sleep 5');
 const startsRun = startRun(starts, 'install', '--restart', '--no-wait');
 check('a bundle that starts is started and said so', /started Freebuff/.test(startsRun.stdout));

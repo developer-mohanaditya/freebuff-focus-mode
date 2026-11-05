@@ -60,7 +60,7 @@
 set -u
 
 # Stamped at build time (scripts/build-desktop.mjs).
-VERSION="1.9.6"
+VERSION="1.9.7"
 # The test suite points this at a file:// copy so update can be exercised without
 # the network. Nothing else sets it.
 ORIGIN="${FREEBUFF_FOCUS_ORIGIN:-https://freebuff-focusmode.vercel.app}"
@@ -143,7 +143,7 @@ cmdname() {
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    install|status|verify|revert|doctor|scan|focus|unfocus|help|version) COMMAND="$1"; shift ;;
+    install|status|verify|revert|doctor|diagnose|scan|focus|unfocus|help|version) COMMAND="$1"; shift ;;
     setup|update|uninstall) COMMAND="$1"; shift ;;
     __watch) COMMAND="__watch"; shift ;;
     --interval|--watch-run|--watch-target|--watch-backup|--watch-stamp|--watch-mode|--watch-pid|--watch-ends)
@@ -512,6 +512,20 @@ rescue_app() {
 # file check cannot answer - whether this bundle starts at all - is answered by
 # starting it, and the stage is undone if it will not. `--no-restart` is the way
 # out for anyone who does not want the tool opening the app.
+# A restart is only a restart if the app is still up a few seconds later. The
+# bundle that dies on a patch dies after it has booted - it gets through its
+# phases, then quits - so a process seen and gone within the same second proves
+# nothing. 0 when something of the bundle is still running, 1 when it is not,
+# with app.asar put back in the same breath.
+confirm_started() {
+  app="$1"; version="$2"
+  sleep "${FREEBUFF_FOCUS_SETTLE_SECS:-4}"
+  [ -n "$(app_pids "$app")" ] && return 0
+  [ -n "$(orchestrator_pids "$app")" ] && return 0
+  rescue_app "$app" "$version" || true
+  return 1
+}
+
 ensure_starts() {
   app="$1"; version="$2"
   [ "$RESTART" = "never" ] && return 0
@@ -1307,6 +1321,7 @@ next_steps() {
   say "  scan          every anchor this build contains - read-only"
   say "  revert        restore the pristine backup"
   say "  doctor        environment report"
+  say "  diagnose      find out which half of the window stage stops Freebuff"
   say "  update        fetch the newest tool, replace it, then patch again"
   say "  uninstall     remove the command; the patch stays"
   say "  help          every command and option"
@@ -1370,6 +1385,7 @@ cmd_help() {
   say "  scan      show every anchor this build has - changes nothing"
   say "  revert    restore the pristine backup"
   say "  doctor    environment report"
+  say "  diagnose  find out which half of the window stage stops Freebuff"
   say "  setup     install the tool and the $COMMAND_NAME command (piped runs do this)"
   say "  update    fetch the latest tool, replace this copy, then patch again"
   say "  uninstall  remove the command and the installed copy; the patch stays"
@@ -1574,12 +1590,17 @@ function main(argv) {
   const shell = files.find((f) => f.path === 'electron/hosted-workspace.cjs');
   if (!shell) throw new Error('hosted-workspace.cjs not found');
   const shellText = read(shell).toString('utf8');
-  const shellDone = shellText.includes(MARK);
+  let shellDone = shellText.includes(MARK);
   // Older builds have no preload beside the window, so an absent file is not a
   // failure: there is simply nothing in the document to hide.
   const page = files.find((f) => f.path === 'electron/hosted-preload.cjs');
   const pageText = page ? read(page).toString('utf8') : null;
-  const pageDone = page ? pageText.includes(PAGE_MARK) : true;
+  let pageDone = page ? pageText.includes(PAGE_MARK) : true;
+  // `diagnose` writes one half of the stage at a time, to find out which half a
+  // build refuses. FBD_ONLY makes the other half look done, so it is not written.
+  const only = process.env.FBD_ONLY || '';
+  if (only === 'request') pageDone = true;
+  else if (only === 'render') shellDone = true;
   if (mode === 'check') {
     console.log(JSON.stringify({
       shell: shellDone, page: pageDone, patched: shellDone && pageDone,
@@ -1969,7 +1990,11 @@ cmd_install() {
         say "  A process that started before the patch is still running it."
         if restart_app "$app"; then
           say "  restarted Freebuff"
-          [ "$WAIT" = "1" ] && { verify_running "$app" "$target" || true; }
+          # A launch that is gone by the next breath is the failure this whole
+          # check exists for, and verify only reports on a running app.
+          if confirm_started "$app" "$version"; then
+            [ "$WAIT" = "1" ] && { verify_running "$app" "$target" || true; }
+          fi
         elif rescue_app "$app" "$version"; then
           [ "$WAIT" = "1" ] && { verify_running "$app" "$target" || true; }
         fi
@@ -2658,6 +2683,118 @@ cmd_unfocus() {
   return 0
 }
 
+# Which half of the window stage does this bundle refuse to start with?
+#
+# The two halves live in one file, so a bundle that dies on launch cannot say
+# which one it minds. Rebuilding app.asar four times - pristine, each half, then
+# both - and starting each one is the only split this tool can make on a machine
+# that has no display: the answer comes from the machine that does.
+cmd_diagnose() {
+  app="$(find_app)" || die "Freebuff Desktop was not found in /Applications or ~/Applications.
+  Pass --app /path/to/Freebuff.app if it lives somewhere else."
+  version="$(app_version "$app")"
+  asar="$app/Contents/Resources/app.asar"
+  plist="$app/Contents/Info.plist"
+  backup="$BACKUP_DIR/app.asar.$version.orig"
+  plist_backup="$BACKUP_DIR/Info.plist.$version.orig"
+  [ -f "$asar" ] || die "no app.asar in $app - this build has no window stage to test"
+  app_binary "$app" >/dev/null 2>&1 \
+    || die "no executable in $app/Contents/MacOS - this tool cannot start that bundle"
+  [ -f "$backup" ] \
+    || die "no pristine app.asar.$version.orig in $BACKUP_DIR.
+  Run: $(cmdname) install once - it keeps one - then run this again."
+  bun="$(shell_bun "$app")" || die "this bundle carries no bun to rewrite app.asar with"
+  js="$(shell_js_path)" || die "the patch engine could not be written out"
+
+  say "${B}Freebuff Focus${OFF} - which half of the window stage stops Freebuff"
+  say "  app      $app"
+  say "  freebuff $version (installed)"
+  say ""
+  say "  Starts Freebuff four times by hand - unpatched, each half, then both -"
+  say "  and puts the pristine file back at the end. Freebuff has to be closed."
+  say ""
+  quit_app "$app" >/dev/null 2>&1 || true
+  stop_watcher
+
+  failed=""
+  for stage in none request render both; do
+    cp "$backup" "$asar" 2>/dev/null || die "could not copy the pristine app.asar back"
+    if [ -f "$plist_backup" ]; then cp "$plist_backup" "$plist" 2>/dev/null || true; fi
+    patch_err=""
+    if [ "$stage" != "none" ]; then
+      # The patcher reports what it wrote on stdout, so only a non-zero exit is
+      # a failed write.
+      patch_out="$(FBD_ONLY="$stage" "$bun" "$js" patch "$asar" 2>&1)" \
+        || patch_err="could not write: $patch_out"
+      shell_sync_integrity "$app" >/dev/null 2>&1 || true
+    fi
+    case "$stage" in
+      none)    label="Freebuff's own files, nothing written" ;;
+      request) label="the ad API block alone" ;;
+      render)  label="the ad card hide alone" ;;
+      both)    label="both halves, what focus writes" ;;
+    esac
+    if [ -n "$patch_err" ]; then
+      say "  ${YELLOW}skipped${OFF}   $label"
+      say "            ${DIM}$(printf '%s\n' "$patch_err" | head -1)${OFF}"
+      failed="$failed $stage:write"
+      continue
+    fi
+    if probe_start "$app"; then
+      say "  ${GREEN}started${OFF}   $label"
+    else
+      say "  ${RED}no start${OFF}  $label"
+      failed="$failed $stage"
+      cp "$(launch_log)" "$SESSION_DIR/diagnose.$stage.log" 2>/dev/null || true
+    fi
+    quit_app "$app" >/dev/null 2>&1 || true
+  done
+
+  # Nothing this tool wrote stays in the bundle: whatever the answer, the reader
+  # is left with the app they started with, and it is open.
+  cp "$backup" "$asar" 2>/dev/null || true
+  if [ -f "$plist_backup" ]; then cp "$plist_backup" "$plist" 2>/dev/null || true; fi
+  shell_sync_integrity "$app" >/dev/null 2>&1 || true
+  say ""
+  say "  ${DIM}app.asar and Info.plist are back to the bytes Freebuff shipped with.${OFF}"
+
+  case "$failed" in
+    *none*)
+      # The unpatched build not starting is the one answer that has nothing to do
+      # with the patch: macOS is refusing the bundle itself.
+      warn "Freebuff's own files did not start either - the patch is not what stops it"
+      say "  macOS is refusing this bundle. That usually means its download flag is"
+      say "  still set, and re-downloading it clears that:"
+      say "    https://freebuff.com/desktop"
+      ;;
+    "")
+      ok "every build started here, including the one focus writes"
+      say "  So the bundle itself is fine and the stop is elsewhere: the launch this"
+      say "  tool does is longer than the one that fails. Send this whole output on."
+      ;;
+    *request*)
+      if [ "$(printf '%s' "$failed" | grep -c render)" = "1" ]; then
+        warn "the bundle refuses any rewritten app.asar, not one half of the stage"
+        say "  The ad API block and the card hide both stop it, so a live patch"
+        say "  cannot work on this build. ${B}Send this output on.${OFF}"
+      else
+        warn "${B}The ad API block${OFF} is what stops Freebuff from starting"
+        say "  The card hide on its own is fine. ${B}Send this output on.${OFF}"
+      fi
+      ;;
+    *render*)
+      warn "${B}The ad card hide${OFF} is what stops Freebuff from starting"
+      say "  The ad API block on its own is fine. ${B}Send this output on.${OFF}"
+      ;;
+    *)
+      warn "a build this tool wrote did not start"
+      ;;
+  esac
+  say "  Each start's own output is in $SESSION_DIR/diagnose.<stage>.log"
+  launch_app "$app" >/dev/null 2>&1 || true
+  return 0
+}
+
 case "$COMMAND" in
   install)
     # The one-liner is the install path: a piped run with no file behind it puts
@@ -2670,7 +2807,8 @@ case "$COMMAND" in
   status)  cmd_status ;;
   verify)  cmd_verify ;;
   revert)  cmd_revert ;;
-  doctor)  cmd_doctor ;;
+  doctor)   cmd_doctor ;;
+  diagnose) cmd_diagnose ;;
   scan)    cmd_scan ;;
   setup)     cmd_setup ;;
   update)    cmd_update ;;
