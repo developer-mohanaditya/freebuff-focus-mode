@@ -294,12 +294,70 @@ quit_app() {
     done
   done
 
-  [ -z "$(orchestrator_pids "$app")" ]
+  # The orchestrator going away is not the app going away. A bundle that dies
+  # while loading its own resources leaves the main process behind with no
+  # window, and that process holds the instance lock the next launch needs.
+  waited=0
+  while [ -n "$(app_pids "$app")" ] && [ "$waited" -lt 3 ]; do
+    sleep 1; waited=$(( waited + 1 ))
+  done
+  for pid in $(app_pids "$app"); do kill -TERM "$pid" 2>/dev/null || true; done
+  sleep 1
+  for pid in $(app_pids "$app"); do kill -KILL "$pid" 2>/dev/null || true; done
+
+  [ -z "$(orchestrator_pids "$app")" ] && [ -z "$(app_pids "$app")" ]
 }
 
 launch_app() {
   command -v open >/dev/null 2>&1 || return 1
   open -a "$1" >/dev/null 2>&1
+}
+
+# ------------------------------------------------------ started, or handed over
+#
+# `open -a` answers for LaunchServices, not for the app: it returns 0 the moment
+# macOS accepts the handover, which is before one line of the bundle has run. A
+# bundle that dies while loading its own resources therefore looks exactly like
+# one that opened - and that is the shape of "it closes and does not come back",
+# the one failure that leaves the reader with no app at all. So every restart is
+# watched, and a restart that did not take is looked into before anything is
+# claimed about it.
+
+# The bundle's own executable. `open` starts this one; the helpers under
+# Frameworks belong to a launch, they are not one.
+app_binary() {
+  dir="$1/Contents/MacOS"
+  [ -d "$dir" ] || return 1
+  for f in "$dir"/*; do
+    [ -f "$f" ] && [ -x "$f" ] && { printf '%s\n' "$f"; return 0; }
+  done
+  return 1
+}
+
+# Every process whose command is this bundle's executable. Same rule as
+# orchestrator_pids: `pgrep -f` matches anything that merely names the path.
+app_pids() {
+  bin="$(app_binary "$1")" || return 1
+  command -v pgrep >/dev/null 2>&1 || return 1
+  for pid in $(pgrep -f "$bin" 2>/dev/null); do
+    [ "$pid" = "$$" ] && continue
+    cmd="$(ps -p "$pid" -o command= 2>/dev/null | sed 's/[[:space:]]*$//')"
+    case "$cmd" in
+      "$bin"|"$bin "*) printf '%s\n' "$pid" ;;
+    esac
+  done
+}
+
+# 0 as soon as anything of this bundle is running, 1 after the whole wait.
+wait_app() {
+  app="$1"; secs="${2:-20}"
+  waited=0
+  while :; do
+    [ -n "$(orchestrator_pids "$app")" ] && return 0
+    [ -n "$(app_pids "$app")" ] && return 0
+    [ "$waited" -ge "$secs" ] && return 1
+    sleep 1; waited=$(( waited + 1 ))
+  done
 }
 
 # 0 when the app is running again, 1 when it could not be brought back. Says
@@ -308,7 +366,132 @@ restart_app() {
   app="$1"
   quit_app "$app" || return 1
   launch_app "$app" || return 1
+  wait_app "$app" "${FREEBUFF_FOCUS_WAIT_APP:-20}"
+}
+
+# Where the next direct start keeps what the app says about itself.
+launch_log() { printf '%s/launch.log\n' "$SESSION_DIR"; }
+
+# Start the bundle by hand, output and all, and watch it for a few seconds.
+# `open` throws that output away, and the line explaining a refusal to load is
+# the whole reason to do this the direct way.
+probe_start() {
+  app="$1"
+  bin="$(app_binary "$app")" || return 1
+  log="$(launch_log)"
+  mkdir -p "$SESSION_DIR" 2>/dev/null || true
+  : > "$log" 2>/dev/null || true
+  "$bin" >>"$log" 2>&1 &
+  pid=$!
+  waited=0
+  while [ "$waited" -lt "${FREEBUFF_FOCUS_PROBE_SECS:-10}" ]; do
+    sleep 1; waited=$(( waited + 1 ))
+    kill -0 "$pid" 2>/dev/null || return 1
+  done
   return 0
+}
+
+# The most telling line the app printed, for a reader who cannot read the log.
+launch_reason() {
+  log="$(launch_log)"
+  [ -s "$log" ] || return 0
+  line="$(grep -m1 -E 'Error|error|FATAL|fatal|Exception|denied|invalid|not found|abort|refus' "$log" 2>/dev/null | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  [ -n "$line" ] || line="$(tail -n 2 "$log" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  [ -n "$line" ] && printf '%s\n' "$line" | cut -c1-150
+}
+
+# Put app.asar and Info.plist back the way the bundle shipped, then open it.
+# Only for bytes that have just been shown not to start: an app that will not
+# open is worse than an app with ads in it, and the ads can come off again once
+# the reason is known.
+window_rollback() {
+  app="$1"; version="$2"
+  asar="$app/Contents/Resources/app.asar"
+  plist="$app/Contents/Info.plist"
+  backup="$BACKUP_DIR/app.asar.$version.orig"
+  plist_backup="$BACKUP_DIR/Info.plist.$version.orig"
+  [ -f "$backup" ] || return 1
+  cp "$backup" "$asar" 2>/dev/null || return 1
+  if [ -f "$plist_backup" ]; then cp "$plist_backup" "$plist" 2>/dev/null || true; fi
+  # An install that never kept the plist still needs it to describe this asar.
+  shell_sync_integrity "$app" >/dev/null 2>&1 || true
+  # A session would keep a watcher alive for a run that never started, and it
+  # would restore a file the ads are already back in.
+  stop_watcher
+  rm -f "$(session_file)" 2>/dev/null || true
+  quit_app "$app" >/dev/null 2>&1 || true
+  # Opening it is the point of putting it back, but the caller reports on the
+  # files, so a slow launch here is not a failure of the rollback.
+  launch_app "$app" >/dev/null 2>&1 || true
+  return 0
+}
+
+# The restart did not take. Two causes look the same from here and only one of
+# them is a property of the patch: a launch that is merely slow, and a bundle
+# that refuses the bytes this tool wrote. A direct start separates them, and only
+# the second puts app.asar back. 0 when Freebuff ends up running, 1 when it does
+# not - including the rollback, which reopens a working app with ads on.
+rescue_app() {
+  app="$1"; version="$2"
+  # Without the bundle's own executable there is no way to tell a slow launch
+  # from a refused one, and guessing would undo a patch that may be fine.
+  app_binary "$app" >/dev/null 2>&1 || return 1
+  quit_app "$app" >/dev/null 2>&1 || true
+  if probe_start "$app"; then
+    rm -f "$SESSION_DIR/launch.failed" 2>/dev/null || true
+    ok "started Freebuff"
+    return 0
+  fi
+  reason="$(launch_reason)"
+  state="$(shell_state "$app")"
+  patched=0
+  case "$state" in patched|partial) patched=1 ;; esac
+  if [ "$patched" = "1" ] && window_rollback "$app" "$version"; then
+    printf '%s\n' "${reason:-it exited without a message}" > "$SESSION_DIR/launch.failed" 2>/dev/null || true
+    warn "Freebuff would not start with the window stage applied, so app.asar and Info.plist were put back exactly as they were"
+    [ -n "$reason" ] && say "  Freebuff said: ${DIM}$reason${OFF}"
+    if [ -n "$(app_pids "$app")" ] || [ -n "$(orchestrator_pids "$app")" ]; then
+      say "  It is open again, with ads. Nothing in the bundle is half-written:"
+      say "  the window stage is gone and the rest of the patch is untouched."
+    else
+      say "  Open Freebuff again - the bundle is exactly the one you installed,"
+      say "  ads and all. Nothing in it is half-written."
+    fi
+    say "  The app's own output is kept in $(launch_log)"
+    return 0
+  fi
+  # fallthrough: not this tool's stage that stopped it, so nothing is undone.
+  printf '%s\n' "${reason:-it exited without a message}" > "$SESSION_DIR/launch.failed" 2>/dev/null || true
+  warn "Freebuff did not start, and app.asar was not rolled back"
+  if [ -n "$reason" ]; then
+    say "  Freebuff said: ${DIM}$reason${OFF}"
+  else
+    say "  It printed nothing. Start it by hand to see why:"
+    say "    $app/Contents/MacOS/"
+  fi
+  return 1
+}
+# Nothing is running and the window stage is in the bundle, so the one thing a
+# file check cannot answer - whether this bundle starts at all - is answered by
+# starting it, and the stage is undone if it will not. `--no-restart` is the way
+# out for anyone who does not want the tool opening the app.
+ensure_starts() {
+  app="$1"; version="$2"
+  [ "$RESTART" = "never" ] && return 0
+  # Nothing can be started here - no `open`, or a bundle laid out differently -
+  # so a failed launch would say nothing about the patch and must not undo it.
+  command -v open >/dev/null 2>&1 || return 0
+  app_binary "$app" >/dev/null 2>&1 || return 0
+  [ -z "$(orchestrator_pids "$app")" ] || return 0
+  [ -z "$(app_pids "$app")" ] || return 0
+  case "$(shell_state "$app")" in patched|partial) : ;; *) return 0 ;; esac
+  say "  ${DIM}Checking that Freebuff still starts with this in place…${OFF}"
+  launch_app "$app" >/dev/null 2>&1 || true
+  if wait_app "$app" "${FREEBUFF_FOCUS_WAIT_APP:-20}"; then
+    ok "it started"
+    return 0
+  fi
+  rescue_app "$app" "$version"
 }
 
 # A process that started before the patch was written is still running the old
@@ -1161,7 +1344,8 @@ cmd_help() {
   say "  --dry-run          report only, write nothing"
   say "  --backup-dir PATH  where the pristine copy lives"
   say "  --resign           ad-hoc re-sign the bundle after patching"
-  say "  --no-restart       leave the app alone; you quit and reopen it"
+  say "  --no-restart       leave the app alone; you quit and reopen it - and skip"
+  say "                     the launch check, which needs to start it"
   say "  --restart          quit and relaunch even if the app was closed"
   say "  --session-dir PATH where a focus session is recorded"
   say "  --no-wait          verify: report now instead of waiting for the relaunch"
@@ -1620,6 +1804,12 @@ cmd_status() {
     unknown) window_note="$window_note, but Info.plist's asar hash could not be read - the app may not start; run: $(cmdname) install" ;;
   esac
   say "  window   $window_note"
+  # A start that failed is the one piece of state a file check cannot report,
+  # and it is the state that leaves the reader with no app to look at.
+  if [ -f "$SESSION_DIR/launch.failed" ] && [ -z "$(orchestrator_pids "$app")" ]; then
+    say "  launch   ${YELLOW}the last start of Freebuff failed${OFF}: $(cut -c1-110 "$SESSION_DIR/launch.failed" 2>/dev/null)"
+    say "           everything it printed is in $(launch_log)"
+  fi
 
   if [ "$(verdict_of "$report")" = "ok" ]; then
     if all_applied "$report"; then
@@ -1727,6 +1917,7 @@ cmd_install() {
     fi
     say ""
 
+    ensure_starts "$app" "$version" || true
     running="$(orchestrator_pids "$app")"
     if [ -z "$running" ]; then
       say "  ${B}Next: open Freebuff.${OFF} The orchestrator is read once at launch,"
@@ -1742,8 +1933,8 @@ cmd_install() {
         if restart_app "$app"; then
           say "  restarted Freebuff"
           [ "$WAIT" = "1" ] && { verify_running "$app" "$target" || true; }
-        else
-          warn "could not restart Freebuff - quit it yourself and open it again"
+        elif rescue_app "$app" "$version"; then
+          [ "$WAIT" = "1" ] && { verify_running "$app" "$target" || true; }
         fi
       fi
     else
@@ -1870,12 +2061,21 @@ cmd_install() {
       else
         say "  Then check what it loaded:  $(cmdname) verify"
       fi
+    elif rescue_app "$app" "$version"; then
+      # It is open, but not necessarily on the bytes that were just written:
+      # rescue_app either started it directly or put the window stage back. Both
+      # were said where they happened, and there is no relaunch here to wait for.
+      say "  Then check what it loaded:  $(cmdname) verify"
     else
-      warn "could not restart Freebuff - quit it completely (Cmd-Q), reopen it, then:"
-      say "    $(cmdname) verify"
+      warn "Freebuff is not running. Start it by hand and read the message it prints"
     fi
+  elif ensure_starts "$app" "$version"; then
+    :  # it opened the app, or put the window stage back and opened it; both were
+       # said where they happened.
   else
     say "${B}Open Freebuff.${OFF} The patch takes effect on the next launch."
+    say "  If it closes again as it opens, the window stage is what it refuses:"
+    say "    $(cmdname) revert      (the bundle goes back to its own bytes)"
     say "  Then check what it loaded:  $(cmdname) verify"
   fi
   say ""
@@ -2107,6 +2307,8 @@ cmd_revert() {
   if [ -n "$(orchestrator_pids "$app")" ]; then
     if restart_app "$app"; then
       say "  restarted Freebuff - the ads are back on the next launch."
+    elif rescue_app "$app" "$version"; then
+      say "  Freebuff is open again."
     else
       warn "could not restart Freebuff - quit it completely (Cmd-Q) and reopen it"
     fi

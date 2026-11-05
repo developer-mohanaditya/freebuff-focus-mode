@@ -1075,6 +1075,62 @@ if (!fs.existsSync(STAMPED)) {
   check('and leaves that build untouched', read(k2.target) === TWO_GATES);
 }
 
+/* ------------------------------------------------ does the bundle start at all */
+
+/**
+ * `open -a` answers for LaunchServices, not for the app: it reports success the
+ * moment macOS accepts the handover, which is before a line of the bundle has
+ * run. So a bundle that dies while loading its own resources looks exactly like
+ * one that opened - "it closes and never comes back". These two fixtures are
+ * that failure and its absence, behind an `open` that only records the handover.
+ */
+console.log('\ndoes the bundle start');
+
+const deafBin = fs.mkdtempSync(path.join(os.tmpdir(), 'fbd-deaf-'));
+fs.writeFileSync(path.join(deafBin, 'open'), '#!/bin/sh\nexit 0\n');
+fs.chmodSync(path.join(deafBin, 'open'), 0o755);
+
+/** A 0.0.200-shaped bundle whose own executable runs `script` and nothing else. */
+function makeStartBundle(script) {
+  const f = addAsarIntegrity(makeShellBundle());
+  const mac = path.join(f.app, 'Contents', 'MacOS');
+  fs.mkdirSync(mac, { recursive: true });
+  const bin = path.join(mac, 'Freebuff');
+  fs.writeFileSync(bin, `#!/bin/sh\n${script}\n`);
+  fs.chmodSync(bin, 0o755);
+  return f;
+}
+
+const startRun = (f, ...args) =>
+  runWith(
+    {
+      PATH: `${deafBin}:${process.env.PATH}`,
+      FREEBUFF_FOCUS_BUN: process.execPath,
+      FREEBUFF_FOCUS_PLUTIL: f.plutil,
+      FREEBUFF_FOCUS_WAIT_APP: '2',
+      FREEBUFF_FOCUS_PROBE_SECS: '2',
+    },
+    f.app,
+    f.backups,
+    ...args
+  );
+
+const wontStart = makeStartBundle(
+  'echo "Error: integrity check failed for electron/hosted-preload.cjs" >&2\nexit 9'
+);
+const wontStartRun = startRun(wontStart, 'install', '--restart', '--no-wait');
+check('a bundle that will not start is not reported as a restart', /would not start with the window stage applied/.test(wontStartRun.stdout));
+check('and what the app said is quoted back', /integrity check failed/.test(wontStartRun.stdout));
+check('app.asar is put back byte for byte', fs.readFileSync(wontStart.asar).equals(wontStart.asarOriginal));
+check('and Info.plist with it', read(wontStart.plist), wontStart.plistOriginal);
+check('the failure is kept for status', /last start of Freebuff failed/.test(startRun(wontStart, 'status').stdout));
+
+const starts = makeStartBundle('sleep 5');
+const startsRun = startRun(starts, 'install', '--restart', '--no-wait');
+check('a bundle that starts is started and said so', /started Freebuff/.test(startsRun.stdout));
+check('and its patch is left in place', count(read(starts.asar), 'FBD-ADS-OFF:dom-v1'), 1);
+check('and its hash still matches', headerHashOf(fs.readFileSync(starts.asar)), recordedHash(starts));
+
 const failed = results.filter((r) => !r).length;
 console.log('');
 if (failed) {
