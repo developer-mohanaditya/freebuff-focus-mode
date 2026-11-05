@@ -35,7 +35,7 @@
            inspected and released together, so this tag carries the same number
            as every file name in downloads/ - the extension zips and the desktop
            package all read <version>, and this is the only version there is. -->
-      <span class="pill">v<span data-version>1.9.1</span></span>
+      <span class="pill">v<span data-version>1.9.2</span></span>
     </header>
 
     <main>
@@ -208,9 +208,9 @@
                 new path again.
               </p>
               <div class="copy-row">
-                <a class="copy copy-download" data-zip href="downloads/freebuff-focus-1.9.1.zip" download>Download extension</a>
+                <a class="copy copy-download" data-zip href="downloads/freebuff-focus-1.9.2.zip" download>Download extension</a>
                 <span class="or-simply">Or simply,</span>
-                <code data-download-path>/downloads/freebuff-focus-1.9.1.zip</code>
+                <code data-download-path>/downloads/freebuff-focus-1.9.2.zip</code>
                 <button type="button" class="copy" data-copy>Copy</button>
               </div>
             </div>
@@ -416,13 +416,13 @@
               <code>sh</code> for a file called <code>status</code>.
             </p>
             <p class="fine">
-              Prefer a file? <a data-desktop-zip href="downloads/freebuff-focus-desktop-1.9.1.zip" download>Download
+              Prefer a file? <a data-desktop-zip href="downloads/freebuff-focus-desktop-1.9.2.zip" download>Download
               the tool</a>, a zip with a double-clickable launcher and a short read-me, then run
               <code>sh freebuff-focus.sh install</code>, or
               <code>sh freebuff-focus.sh setup</code> if you want the command as well.
             </p>
             <p class="fine">
-              Tool v<span data-version>1.9.1</span>, matched to Freebuff Desktop
+              Tool v<span data-version>1.9.2</span>, matched to Freebuff Desktop
               <strong>0.0.192 and 0.0.196</strong>: while applied it does two things. It
               quiets the local ad auction and pauses the ad client API path, and it rewrites
               <code>app.asar</code> so the window - which renders freebuff.com in its own
@@ -431,7 +431,13 @@
               <code>/api/ad/*</code>, <code>/api/ads/*</code> and the ad telemetry beside
               them. The second half is what removes that card; blocking only
               <code>/api/ad/*</code> left it there, because the card comes from the other
-              endpoint. It undoes its own
+              endpoint.
+            </p>
+            <p>
+              Freebuff 0.0.200 records a SHA256 of the <code>app.asar</code> header in
+              <code>Info.plist</code> and will not start when the two disagree, so the
+              tool updates that hash as it rewrites the file - and backs up both, so
+              <code>revert</code> still restores the bundle exactly. It undoes its own
               write if the result does not check out. If a Freebuff release moves code it
               cannot recognise, it refuses and prints the counts it saw instead of guessing,
               and <code>freebuff-focusmode scan</code> prints what the installed build actually
@@ -488,7 +494,7 @@
                  at a higher specificity than `.btn-primary`, which paints orange
                  text on the orange fill. See the guard in site/styles.css. -->
             <p class="fine">
-              Prefer a file? <a data-desktop-win-zip href="downloads/freebuff-focus-desktop-1.9.1-windows.zip" download>Download
+              Prefer a file? <a data-desktop-win-zip href="downloads/freebuff-focus-desktop-1.9.2-windows.zip" download>Download
               the tool</a>, a zip with a double-clickable launcher and a short read-me. A saved
               file carries the mark-of-the-web, so either unblock it first with
               <code>Unblock-File .\freebuff-focus-desktop.ps1</code>, or run it the way the
@@ -521,7 +527,7 @@
               and it does. Without that, the installer prints the exact command that does it.
             </p>
             <p class="fine">
-              Tool v<span data-version>1.9.1</span>, anchored against Freebuff Desktop
+              Tool v<span data-version>1.9.2</span>, anchored against Freebuff Desktop
               <strong>0.0.192</strong>, the same two anchors as the macOS tool: it forces the ad
               auction to return nothing and cuts the ad client off from its API, and it undoes its
               own write if the result does not check out. It finds the install itself (the per-user
@@ -612,12 +618,12 @@
               tool.
             </p>
             <p class="fine">
-              Prefer a file? <a data-desktop-linux-zip href="downloads/freebuff-focus-desktop-1.9.1-linux.zip" download>Download
+              Prefer a file? <a data-desktop-linux-zip href="downloads/freebuff-focus-desktop-1.9.2-linux.zip" download>Download
               the tool</a>, a zip with the script and a short read-me, then run
               <code>sh freebuff-focus-linux.sh</code>.
             </p>
             <p class="fine">
-              Tool v<span data-version>1.9.1</span>, anchored against Freebuff Desktop
+              Tool v<span data-version>1.9.2</span>, anchored against Freebuff Desktop
               <strong>0.0.192</strong>, the same two anchors, verified against the real Linux
               build: it forces the ad auction to return nothing and cuts the ad client off from its
               API, and it undoes its own write if the result does not check out. It looks for
@@ -743,7 +749,7 @@
         </div>
       </div>
       <p>
-        Freebuff Focus Mode · v<span data-version>1.9.1</span> · ads on by default, no accounts, no
+        Freebuff Focus Mode · v<span data-version>1.9.2</span> · ads on by default, no accounts, no
         telemetry.
       </p>
       <p class="fine">

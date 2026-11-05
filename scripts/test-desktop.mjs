@@ -161,6 +161,74 @@ function makeShellBundle(body = CURRENT, hwSource = SHELL_HW) {
   return f;
 }
 
+/** SHA256 over the asar header block - what Electron's integrity fuse checks. */
+function headerHashOf(asar) {
+  const jlen = asar.readUInt32LE(12);
+  return crypto.createHash('sha256').update(asar.slice(16, 16 + jlen)).digest('hex');
+}
+
+/**
+ * Stand-in for /usr/libexec/PlistBuddy, which only exists on macOS. It answers
+ * the two commands the tool uses on the one key it touches; everything else is
+ * left to the real binary on a real machine.
+ */
+const PLISTBUDDY_SHIM = `#!${process.execPath}
+const fs = require('fs');
+const args = process.argv.slice(2);
+const cmd = args[args.indexOf('-c') + 1];
+const file = args[args.length - 1];
+const [keypath, ...value] = cmd.slice(cmd.indexOf(' ') + 1).split(' ');
+const leaf = keypath.split(':').filter(Boolean).pop();
+let text = fs.readFileSync(file, 'utf8');
+if (cmd.startsWith('Print')) {
+  const m = text.match(new RegExp('<key>' + leaf + '</key>[^<]*<string>([^<]*)</string>'));
+  if (!m) process.exit(1);
+  console.log(m[1]);
+} else if (cmd.startsWith('Set')) {
+  text = text.replace(new RegExp('(<key>' + leaf + '</key>[^<]*<string>)[^<]*(</string>)'), '$1' + value.join(' ') + '$2');
+  fs.writeFileSync(file, text);
+} else process.exit(2);
+`;
+
+/**
+ * A bundle built like 0.0.200: Info.plist records the asar header hash and
+ * Electron will not start when they disagree. `recorded` defaults to the hash of
+ * the pristine build, which is what an untouched install would carry.
+ */
+function addAsarIntegrity(f, recorded) {
+  const hash = recorded || headerHashOf(buildAsar(SHELL_HW));
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>ElectronAsarIntegrity</key>
+  <dict>
+    <key>Resources/app.asar</key>
+    <dict>
+      <key>algorithm</key>
+      <string>SHA256</string>
+      <key>hash</key>
+      <string>${hash}</string>
+    </dict>
+  </dict>
+</dict>
+</plist>
+`;
+  f.plist = path.join(f.app, 'Contents', 'Info.plist');
+  fs.writeFileSync(f.plist, plist);
+  f.plistOriginal = plist;
+  f.plistbuddy = path.join(f.root, 'PlistBuddy');
+  fs.writeFileSync(f.plistbuddy, PLISTBUDDY_SHIM);
+  fs.chmodSync(f.plistbuddy, 0o755);
+  return f;
+}
+
+/** The hash this fixture's Info.plist currently records. */
+const recordedHash = (f) => {
+  const m = fs.readFileSync(f.plist, 'utf8').match(/<key>hash<\/key>\s*<string>([^<]*)<\/string>/);
+  return m && m[1];
+};
+
 /**
  * Where an install would land, per fixture. A test that let `setup` write to the
  * real ~/.local/bin would be installing a command on the machine that runs the
@@ -188,9 +256,13 @@ const bundlePaths = (app) => {
 };
 
 function run(app, backups, ...args) {
+  return runWith({}, app, backups, ...args);
+}
+
+function runWith(extraEnv, app, backups, ...args) {
   return spawnSync('sh', [TOOL, ...args, '--app', app, '--backup-dir', backups], {
     encoding: 'utf8',
-    env: toolEnv(bundlePaths(app)),
+    env: toolEnv(bundlePaths(app), extraEnv),
   });
 }
 
@@ -361,6 +433,39 @@ check('and installs the wider block', fs.readFileSync(upgrade.asar, 'utf8').incl
 check('status is honest again', /window\s+ad API blocked/.test(run(upgrade.app, upgrade.backups, 'status').stdout));
 run(upgrade.app, upgrade.backups, 'revert');
 check('and revert still restores the pristine bytes', fs.readFileSync(upgrade.asar).equals(upgrade.asarOriginal));
+
+// 0.0.200 records SHA256 of the asar header in Info.plist and Electron refuses
+// to start when the two disagree. Rewriting app.asar always changes that header,
+// so the recorded hash has to move with it - otherwise the tool blocks the ads
+// by making the app unlaunchable, which is what 1.9.1 did on 0.0.200.
+console.log('\nthe asar integrity fuse (0.0.200)');
+const fused = addAsarIntegrity(makeShellBundle());
+const fusedEnv = { FREEBUFF_FOCUS_PLISTBUDDY: fused.plistbuddy };
+const fusedInstall = runWith(fusedEnv, fused.app, fused.backups, 'install');
+check('install exits 0', fusedInstall.status, 0);
+check('it says it moved the recorded hash', /app\.asar hash updated in Info\.plist/.test(fusedInstall.stdout));
+check('the recorded hash is the rewritten asar\'s', recordedHash(fused), headerHashOf(fs.readFileSync(fused.asar)));
+check('status calls the hash verified', /hash verified/.test(runWith(fusedEnv, fused.app, fused.backups, 'status').stdout));
+
+// The state 1.9.1 left behind: block written, hash still the pristine one. The
+// app does not start, and the tool must say so instead of claiming ads are off.
+fs.writeFileSync(fused.plist, fused.plistOriginal);
+const broken = runWith(fusedEnv, fused.app, fused.backups, 'status');
+check('status says the app will not start', /will not start/.test(broken.stdout));
+check('and does not claim ads are off', /Ads are off/.test(broken.stdout), false);
+const repaired = runWith(fusedEnv, fused.app, fused.backups, 'install');
+check('install repairs that state', /app\.asar hash updated in Info\.plist/.test(repaired.stdout));
+check('status is honest again', /hash verified/.test(runWith(fusedEnv, fused.app, fused.backups, 'status').stdout));
+
+runWith(fusedEnv, fused.app, fused.backups, 'revert');
+check('revert restores the asar', fs.readFileSync(fused.asar).equals(fused.asarOriginal));
+check('and Info.plist with it', fs.readFileSync(fused.plist, 'utf8'), fused.plistOriginal);
+
+// A build without the fuse (0.0.196) has no such key and must be left alone.
+const noFuse = makeShellBundle();
+const noFuseInstall = run(noFuse.app, noFuse.backups, 'install');
+check('a build without the key still installs', /blocked the ad API/.test(noFuseInstall.stdout));
+check('and no Info.plist is written', fs.existsSync(path.join(noFuse.app, 'Contents', 'Info.plist')), false);
 
 /* ------------------------------------------------------------ display-only */
 

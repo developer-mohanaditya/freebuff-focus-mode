@@ -1210,7 +1210,7 @@ cmd_help() {
 # network. Only electron/hosted-workspace.cjs changes; every other entry is
 # copied byte for byte and the asar integrity hashes are recomputed.
 
-SHELL_JS_TAG='v2'
+SHELL_JS_TAG='v3'
 
 shell_js_path() {
   mkdir -p "$SESSION_DIR" 2>/dev/null || return 1
@@ -1219,8 +1219,9 @@ shell_js_path() {
     printf '%s\n' "$js"
     return 0
   fi
-  cat >"$js" <<'FBD_SHELL_JS'
-// shell-adblock v1
+  {
+  printf '// shell-adblock %s\n' "$SHELL_JS_TAG"
+  cat <<'FBD_SHELL_JS'
 'use strict';
 const fs = require('fs');
 const crypto = require('crypto');
@@ -1235,7 +1236,12 @@ function readAsar(p) {
   const headerSize = buf.readUInt32LE(4);
   const jlen = buf.readUInt32LE(12);
   const header = JSON.parse(buf.slice(16, 16 + jlen).toString('utf8').replace(/\0+$/, '').trimEnd());
-  return { buf, header, base: 8 + headerSize };
+  return { buf, header, jlen, base: 8 + headerSize };
+}
+// What Electron's asar-integrity fuse compares against the hash recorded in
+// Info.plist on macOS: SHA256 over the header block, padding included.
+function headerHash(buf, jlen) {
+  return crypto.createHash('sha256').update(buf.slice(16, 16 + jlen)).digest('hex');
 }
 function walk(node, prefix, out) {
   for (const name of Object.keys(node.files || {})) {
@@ -1248,7 +1254,8 @@ function walk(node, prefix, out) {
 }
 function main(argv) {
   const mode = argv[0], asarPath = argv[1];
-  const { buf, header, base } = readAsar(asarPath);
+  const { buf, header, jlen, base } = readAsar(asarPath);
+  if (mode === 'hash') { console.log(headerHash(buf, jlen)); return; }
   const files = walk(header, '', []);
   const read = (f) => buf.slice(base + Number(f.entry.offset), base + Number(f.entry.offset) + Number(f.entry.size));
   const target = files.find((f) => f.path === 'electron/hosted-workspace.cjs');
@@ -1283,19 +1290,20 @@ function main(argv) {
   }
   const json = Buffer.from(JSON.stringify(header), 'utf8');
   const pad = (4 - (json.length % 4)) % 4;
-  const jlen = json.length + pad;
+  const newJlen = json.length + pad;
   const head = Buffer.alloc(16);
   head.writeUInt32LE(4, 0);
-  head.writeUInt32LE(jlen + 8, 4);
-  head.writeUInt32LE(jlen + 4, 8);
-  head.writeUInt32LE(jlen, 12);
+  head.writeUInt32LE(newJlen + 8, 4);
+  head.writeUInt32LE(newJlen + 4, 8);
+  head.writeUInt32LE(newJlen, 12);
   const out = Buffer.concat([head, json, Buffer.alloc(pad), ...parts]);
   fs.writeFileSync(asarPath + '.fbd-tmp', out);
   fs.renameSync(asarPath + '.fbd-tmp', asarPath);
-  console.log(JSON.stringify({ patched: true, size: out.length, files: files.length }));
+  console.log(JSON.stringify({ patched: true, size: out.length, files: files.length, hash: headerHash(out, newJlen) }));
 }
 main(process.argv.slice(2));
 FBD_SHELL_JS
+  } >"$js"
   printf '%s\n' "$js"
 }
 
@@ -1308,6 +1316,48 @@ shell_bun() {
   fi
   bun="$1/Contents/Resources/bun/bun"
   [ -x "$bun" ] && printf '%s\n' "$bun"
+}
+
+# 0.0.200 ships an asar-integrity fuse: Info.plist records the SHA256 of the
+# app.asar header, and Electron refuses to start when the two disagree. Any
+# rewrite of app.asar changes that header, so the recorded hash has to follow
+# or the app silently stops launching. PlistBuddy takes a : path, so the dots
+# and slashes in "Resources/app.asar" need no escaping.
+PLISTBUDDY="${FREEBUFF_FOCUS_PLISTBUDDY:-/usr/libexec/PlistBuddy}"
+
+# The hash this build records for app.asar, empty when it records none.
+plist_hash() {
+  plist="$1/Contents/Info.plist"
+  [ -f "$plist" ] && [ -x "$PLISTBUDDY" ] || return 1
+  "$PLISTBUDDY" -c "Print :ElectronAsarIntegrity:Resources/app.asar:hash" "$plist" 2>/dev/null
+}
+
+shell_asar_hash() {
+  bun="$(shell_bun "$1")" || return 1
+  js="$(shell_js_path)" || return 1
+  "$bun" "$js" hash "$1/Contents/Resources/app.asar" 2>/dev/null
+}
+
+# ok | mismatch | none (this build does not check) | unknown
+shell_integrity() {
+  want="$(plist_hash "$1")" || { printf 'none\n'; return 0; }
+  got="$(shell_asar_hash "$1")" || { printf 'unknown\n'; return 0; }
+  if [ -n "$want" ] && [ "$want" = "$got" ]; then
+    printf 'ok\n'
+  else
+    printf 'mismatch\n'
+  fi
+}
+
+# ok | updated | none | failed
+shell_sync_integrity() {
+  app="$1"; plist="$app/Contents/Info.plist"
+  want="$(plist_hash "$app")" || { printf 'none\n'; return 0; }
+  got="$(shell_asar_hash "$app")" || { printf 'failed\n'; return 0; }
+  [ "$want" = "$got" ] && { printf 'ok\n'; return 0; }
+  "$PLISTBUDDY" -c "Set :ElectronAsarIntegrity:Resources/app.asar:hash $got" "$plist" >/dev/null 2>&1 \
+    || { printf 'failed\n'; return 0; }
+  [ "$(plist_hash "$app")" = "$got" ] && printf 'updated\n' || printf 'failed\n'
 }
 
 # patched | unpatched | unsupported - never a guess about pixels, only the file.
@@ -1329,11 +1379,10 @@ shell_apply() {
   app="$1"; version="$2"
   state="$(shell_state "$app")"
   asar="$app/Contents/Resources/app.asar"
+  plist="$app/Contents/Info.plist"
   backup="$BACKUP_DIR/app.asar.$version.orig"
+  plist_backup="$BACKUP_DIR/Info.plist.$version.orig"
   case "$state" in
-    patched)
-      ok "window   the ad API is already blocked in app.asar"
-      return 0 ;;
     unsupported)
       say "  window   ${DIM}not blocked - this build has no app.asar to rewrite${OFF}"
       return 0 ;;
@@ -1346,36 +1395,71 @@ shell_apply() {
       fi
       cp "$backup" "$asar" 2>/dev/null || { warn "could not rewind app.asar to its backup"; return 1; }
       say "  window   older block found - replacing it" ;;
+    patched)
+      ok "window   the ad API is already blocked in app.asar" ;;
   esac
-  bun="$(shell_bun "$app")"; js="$(shell_js_path)" || return 1
-  mkdir -p "$BACKUP_DIR" 2>/dev/null || true
-  if [ ! -f "$backup" ]; then
-    if ! cp "$asar" "$backup" 2>/dev/null; then
-      warn "could not back up app.asar - leaving the window's ads alone"
+  if [ "$state" != "patched" ]; then
+    bun="$(shell_bun "$app")"; js="$(shell_js_path)" || return 1
+    mkdir -p "$BACKUP_DIR" 2>/dev/null || true
+    if [ ! -f "$backup" ]; then
+      if ! cp "$asar" "$backup" 2>/dev/null; then
+        warn "could not back up app.asar - leaving the window's ads alone"
+        return 1
+      fi
+    fi
+    patch_err="$("$bun" "$js" patch "$asar" 2>&1)" && patch_ok=1 || patch_ok=0
+    if [ "$patch_ok" = 0 ] || [ "$(shell_state "$app")" != "patched" ]; then
+      cp "$backup" "$asar" 2>/dev/null || true
+      reason="$(printf '%s\n' "$patch_err" | grep -m1 -E 'Error: |error: ' | sed 's/^Error: //; s/^ *//')"
+      warn "could not block the window's ad API - app.asar was put back as it was${reason:+ ($reason)}"
       return 1
     fi
+    ok "window   blocked the ad API in app.asar"
+    say "  backup   $backup"
   fi
-  patch_err="$("$bun" "$js" patch "$asar" 2>&1)" && patch_ok=1 || patch_ok=0
-  if [ "$patch_ok" = 0 ] || [ "$(shell_state "$app")" != "patched" ]; then
-    cp "$backup" "$asar" 2>/dev/null || true
-    reason="$(printf '%s\n' "$patch_err" | grep -m1 -E 'Error: |error: ' | sed 's/^Error: //; s/^ *//')"
-    warn "could not block the window's ad API - app.asar was put back as it was${reason:+ ($reason)}"
-    return 1
+  # Keep Info.plist's copy of the asar hash in step, and keep the original bytes
+  # so revert can put back a file that still describes the pristine asar.
+  if plist_hash "$app" >/dev/null 2>&1; then
+    if [ ! -f "$plist_backup" ] && [ -f "$plist" ]; then
+      cp "$plist" "$plist_backup" 2>/dev/null || true
+    fi
   fi
-  ok "window   blocked the ad API in app.asar"
-  say "  backup   $backup"
+  integrity="$(shell_sync_integrity "$app")"
+  case "$integrity" in
+    ok|none) : ;;
+    updated)
+      ok "window   app.asar hash updated in Info.plist"
+      say "  backup   $plist_backup" ;;
+    *)
+      # A block Electron will not load is worse than no block: make the app start.
+      cp "$backup" "$asar" 2>/dev/null || true
+      if [ -f "$plist_backup" ]; then
+        cp "$plist_backup" "$plist" 2>/dev/null || true
+      fi
+      warn "this build checks app.asar against a hash in Info.plist and the tool could not update it - app.asar was put back as it was"
+      return 1 ;;
+  esac
 }
 
 shell_restore() {
   app="$1"; version="$2"
   asar="$app/Contents/Resources/app.asar"
+  plist="$app/Contents/Info.plist"
   backup="$BACKUP_DIR/app.asar.$version.orig"
+  plist_backup="$BACKUP_DIR/Info.plist.$version.orig"
   [ -f "$backup" ] || return 0
   [ -f "$asar" ] || return 0
   case "$(shell_state "$app")" in
     patched|stale)
       if cp "$backup" "$asar" 2>/dev/null; then
         ok "restored app.asar from $backup"
+        if [ -f "$plist_backup" ]; then
+          if cp "$plist_backup" "$plist" 2>/dev/null; then
+            ok "restored Info.plist from $plist_backup"
+          fi
+        fi
+        # Older installs never backed up the plist: make it describe this asar.
+        shell_sync_integrity "$app" >/dev/null 2>&1 || true
       else
         warn "could not restore app.asar - copy it back by hand: $backup"
       fi ;;
@@ -1400,6 +1484,7 @@ cmd_status() {
   render_report "$report"
 
   window_state="$(shell_state "$app")"
+  integrity_state="$(shell_integrity "$app")"
   # A case inside $( ) trips the bash 3.2 that macOS ships as /bin/sh, so the
   # label is chosen first and printed after.
   case "$window_state" in
@@ -1408,12 +1493,21 @@ cmd_status() {
     unpatched) window_note="not blocked - run: $(cmdname) install" ;;
     *) window_note="n/a on this build" ;;
   esac
+  case "$integrity_state" in
+    ok) window_note="$window_note, hash verified" ;;
+    mismatch) window_note="$window_note, but Info.plist's asar hash is stale - Freebuff will not start; run: $(cmdname) install" ;;
+  esac
   say "  window   $window_note"
 
   if [ "$(verdict_of "$report")" = "ok" ]; then
     if all_applied "$report"; then
       say ""
-      if [ "$window_state" = "patched" ]; then
+      if [ "$window_state" = "patched" ] && [ "$integrity_state" = "mismatch" ]; then
+        say "  ${YELLOW}The block is written, but Info.plist's copy of the app.asar hash is stale.${OFF}"
+        say "  macOS builds from 0.0.200 on verify that hash and refuse to start, so"
+        say "  Freebuff will not open until it is updated. Run: $(cmdname) install"
+        return 0
+      elif [ "$window_state" = "patched" ]; then
         say "  ${GREEN}Ads are off.${OFF} Quit Freebuff and reopen it, then check what it loaded:"
       else
         say "  ${YELLOW}The local ad auction is off, but the window is not.${OFF}"
@@ -1488,8 +1582,10 @@ cmd_install() {
     say "  ${GREEN}Already patched.${OFF} Every anchor in this build is already replaced."
     render_report "$report"
     # An install of 1.9.0 over a bundle patched by 1.8.x lands here: the
-    # orchestrator is already done, the window stage is not.
-    if [ "$(shell_state "$app")" != "patched" ]; then
+    # orchestrator is already done, the window stage is not. So does a bundle
+    # whose app.asar is blocked but whose Info.plist still records the pristine
+    # hash - the state that stops 0.0.200 from starting at all.
+    if [ "$(shell_state "$app")" != "patched" ] || [ "$(shell_integrity "$app")" = "mismatch" ]; then
       if shell_apply "$app" "$version"; then
         if [ "$RESIGN" = "1" ] && command -v codesign >/dev/null 2>&1; then
           codesign --force --deep --sign - "$app" 2>/dev/null \
@@ -1588,8 +1684,14 @@ cmd_install() {
   say ""
 
   # The local auction is only half the story: the window renders freebuff.com in
-  # its own session, so its ads have to be blocked there too.
-  shell_apply "$app" "$version" || true
+  # its own session, so its ads have to be blocked there too. A failure here is
+  # reported rather than swallowed: it means the window still shows ads, and on
+  # builds that verify app.asar it can also mean the app would not start.
+  if shell_apply "$app" "$version"; then
+    window_ok=1
+  else
+    window_ok=0
+  fi
   say ""
 
   if [ "$RESIGN" = "1" ] && command -v codesign >/dev/null 2>&1; then
@@ -1600,7 +1702,11 @@ cmd_install() {
     fi
   fi
 
-  ok "patched Freebuff $version"
+  if [ "$window_ok" = 1 ]; then
+    ok "patched Freebuff $version"
+  else
+    warn "patched the local auction, but the window stage failed - the ads above the composer are still on"
+  fi
   hr
 
   # A fresh write means any recorded session describes the old bytes. The watcher
