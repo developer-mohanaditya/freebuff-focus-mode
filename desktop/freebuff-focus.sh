@@ -387,10 +387,12 @@ restart_app() {
 # Where the next direct start keeps what the app says about itself.
 launch_log() { printf '%s/launch.log\n' "$SESSION_DIR"; }
 
-# Start the bundle by hand, output and all, and watch it for a few seconds.
-# `open` throws that output away, and the line explaining a refusal to load is
-# the whole reason to do this the direct way.
-probe_start() {
+# Start the bundle's executable by hand, output and all, and watch it for a few
+# seconds. `open` throws that output away, and the line explaining a refusal to
+# load is the whole reason to do this the direct way. 1 does not mean the bundle
+# is broken: macOS SIGKILLs a hand-started copy of some bundles while the same
+# bundle opens from Finder, so PROBE_KILLED carries that apart for the caller.
+probe_direct() {
   app="$1"
   bin="$(app_binary "$app")" || return 1
   log="$(launch_log)"
@@ -401,9 +403,36 @@ probe_start() {
   waited=0
   while [ "$waited" -lt "${FREEBUFF_FOCUS_PROBE_SECS:-10}" ]; do
     sleep 1; waited=$(( waited + 1 ))
-    kill -0 "$pid" 2>/dev/null || return 1
+    kill -0 "$pid" 2>/dev/null || break
   done
-  return 0
+  kill -0 "$pid" 2>/dev/null && return 0
+  wait "$pid" 2>/dev/null
+  code=$?
+  if [ "$code" = "137" ] || [ "$code" = "9" ]; then PROBE_KILLED=1; fi
+  return 1
+}
+
+# Did this bundle start? The direct start answers it and keeps the app's own
+# output, but a killed direct start is macOS minding how it was started, not the
+# bytes - the same bundle opens from Finder. So it is followed by the launch a
+# reader would make, and only both of them failing is an answer about the bundle.
+# PROBE_MODE says which one settled it, for the wording.
+probe_start() {
+  app="$1"
+  PROBE_KILLED=0
+  if probe_direct "$app"; then
+    PROBE_MODE=direct
+    return 0
+  fi
+  quit_app "$app" >/dev/null 2>&1 || true
+  if launch_app "$app" >/dev/null 2>&1; then
+    if wait_app "$app" "${FREEBUFF_FOCUS_PROBE_SECS:-10}"; then
+      PROBE_MODE=open
+      return 0
+    fi
+  fi
+  PROBE_MODE=none
+  return 1
 }
 
 # The most telling line the app printed, for a reader who cannot read the log.
@@ -465,6 +494,10 @@ rescue_app() {
     printf '%s\n' "${reason:-it exited without a message}" > "$SESSION_DIR/launch.failed" 2>/dev/null || true
     warn "Freebuff would not start with the window stage applied, so app.asar and Info.plist were put back exactly as they were"
     [ -n "$reason" ] && say "  Freebuff said: ${DIM}$reason${OFF}"
+    if [ "${PROBE_KILLED:-0}" = "1" ]; then
+      say "  ${DIM}macOS killed the start this tool makes by hand (Killed: 9) - a normal${OFF}"
+      say "  ${DIM}launch did not keep it open either, so the bytes are the question.${OFF}"
+    fi
     if [ -n "$(app_pids "$app")" ] || [ -n "$(orchestrator_pids "$app")" ]; then
       say "  It is open again, with ads. Nothing in the bundle is half-written:"
       say "  the window stage is gone and the rest of the patch is untouched."
@@ -501,8 +534,13 @@ rescue_app() {
     say "  Freebuff said: ${DIM}$reason${OFF}"
   else
     bin="$(app_binary "$app" 2>/dev/null)"
-    say "  It printed nothing. Start it by hand to see why:"
-    say "    ${bin:-$app/Contents/MacOS/Freebuff}"
+    if [ "${PROBE_KILLED:-0}" = "1" ]; then
+      say "  macOS killed the start this tool made by hand (${B}Killed: 9${OFF}), and a"
+      say "  normal launch did not keep it open either."
+    else
+      say "  It printed nothing. Start it by hand to see why:"
+      say "    ${bin:-$app/Contents/MacOS/Freebuff}"
+    fi
   fi
   say "  If it still will not open, put the pristine files back: $(cmdname) revert"
   say "  The app's own output is kept in $(launch_log)"
@@ -2717,6 +2755,7 @@ cmd_diagnose() {
   stop_watcher
 
   failed=""
+  killed_any=0
   for stage in none request render both; do
     cp "$backup" "$asar" 2>/dev/null || die "could not copy the pristine app.asar back"
     if [ -f "$plist_backup" ]; then cp "$plist_backup" "$plist" 2>/dev/null || true; fi
@@ -2745,6 +2784,7 @@ cmd_diagnose() {
     else
       say "  ${RED}no start${OFF}  $label"
       failed="$failed $stage"
+      [ "${PROBE_KILLED:-0}" = "1" ] && killed_any=1
       cp "$(launch_log)" "$SESSION_DIR/diagnose.$stage.log" 2>/dev/null || true
     fi
     quit_app "$app" >/dev/null 2>&1 || true
@@ -2762,10 +2802,17 @@ cmd_diagnose() {
     *none*)
       # The unpatched build not starting is the one answer that has nothing to do
       # with the patch: macOS is refusing the bundle itself.
-      warn "Freebuff's own files did not start either - the patch is not what stops it"
-      say "  macOS is refusing this bundle. That usually means its download flag is"
-      say "  still set, and re-downloading it clears that:"
-      say "    https://freebuff.com/desktop"
+      if [ "$killed_any" = "1" ]; then
+        warn "this Mac kills the copy this tool starts by hand (Killed: 9)"
+        say "  Freebuff's own files died the same way, so these four lines say nothing"
+        say "  about the patch - and your app opens normally when you start it."
+        say "  ${B}Send this output on.${OFF}"
+      else
+        warn "Freebuff's own files did not start either - the patch is not what stops it"
+        say "  macOS is refusing this bundle. That usually means its download flag is"
+        say "  still set, and re-downloading it clears that:"
+        say "    https://freebuff.com/desktop"
+      fi
       ;;
     "")
       ok "every build started here, including the one focus writes"

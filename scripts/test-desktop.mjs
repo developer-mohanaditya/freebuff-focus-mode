@@ -1155,6 +1155,52 @@ check('a bundle that starts is started and said so', /started Freebuff/.test(sta
 check('and its patch is left in place', count(read(starts.asar), 'FBD-ADS-OFF:dom-v1'), 1);
 check('and its hash still matches', headerHashOf(fs.readFileSync(starts.asar)), recordedHash(starts));
 
+// On some Macs the kernel kills a hand-started copy of the bundle (Killed: 9)
+// while the same bytes open fine from Finder. A direct start that dies is
+// therefore not an answer on its own: the launch a reader would make has to
+// follow it, or every patch looks broken on that machine.
+const reviveBin = fs.mkdtempSync(path.join(os.tmpdir(), 'fbd-revive-'));
+fs.writeFileSync(
+  path.join(reviveBin, 'open'),
+  [
+    '#!/bin/sh',
+    'app=""',
+    'while [ $# -gt 0 ]; do',
+    '  case "$1" in -a) shift; app="$1" ;; esac',
+    '  shift',
+    'done',
+    'sh -c "sleep 30; exit 0" "$app/Contents/Resources/orchestrator/orchestrator.js" >/dev/null 2>&1 &',
+    'exit 0',
+    '',
+  ].join('\n')
+);
+fs.chmodSync(path.join(reviveBin, 'open'), 0o755);
+
+const startRunOpen = (f, ...args) =>
+  runWith(
+    {
+      PATH: `${reviveBin}:${process.env.PATH}`,
+      FREEBUFF_FOCUS_BUN: process.execPath,
+      FREEBUFF_FOCUS_PLUTIL: f.plutil,
+      FREEBUFF_FOCUS_WAIT_APP: '2',
+      FREEBUFF_FOCUS_PROBE_SECS: '2',
+    },
+    f.app,
+    f.backups,
+    ...args
+  );
+
+const killed = makeStartBundle('kill -9 $$');
+const killedRun = startRun(killed, 'install', '--restart', '--no-wait');
+check('a hand-started bundle the kernel kills is still a failed start', /would not start with the window stage applied/.test(killedRun.stdout));
+check('and the kill is named as the reason, not the patch', /Killed: 9/.test(killedRun.stdout));
+check('and that bundle is put back', fs.readFileSync(killed.asar).equals(killed.asarOriginal));
+
+const revived = makeStartBundle('kill -9 $$');
+const revivedRun = startRunOpen(revived, 'install', '--restart', '--no-wait');
+check('the same kill with a normal launch that works is a start', /started Freebuff/.test(revivedRun.stdout));
+check('and the patch it installed is left in place', count(read(revived.asar), 'FBD-ADS-OFF:dom-v1'), 1);
+
 const failed = results.filter((r) => !r).length;
 console.log('');
 if (failed) {
