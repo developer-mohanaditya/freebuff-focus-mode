@@ -752,6 +752,7 @@ check('the alias passes arguments through too', read(path.join(cmdInstall.bin, '
 check('and passes its arguments through', read(launcher).includes('%*'));
 check('and says where both went', setup.stdout.includes(cmdInstall.home) && setup.stdout.includes(launcher));
 check('and does not patch anything yet', read(cmdInstall.target) === CURRENT);
+check('and says a new terminal may be needed', /open a new terminal/.test(setup.stdout));
 check('setup again is not an error', runStamped(cmdInstall.app, cmdInstall.backups, 'setup').status, 0);
 
 const viaCommand = runInstalled(cmdInstall, 'version');

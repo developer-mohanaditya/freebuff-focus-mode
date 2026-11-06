@@ -990,6 +990,10 @@ check(
 check('it installs the tool itself', fs.existsSync(path.join(inst.home, 'freebuff-focus.sh')));
 check('and says where both went', setup.stdout.includes(inst.home) && setup.stdout.includes(shim));
 check('and does not patch anything yet', read(inst.target) === CURRENT);
+check(
+  'and tells a stale shell how to see the command',
+  /rehash \(zsh\) or open a new terminal/.test(setup.stdout)
+);
 check('setup again is not an error', runStamped(inst.app, inst.backups, 'setup').status, 0);
 
 // A name that is already someone else's command stays theirs.

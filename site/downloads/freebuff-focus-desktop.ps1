@@ -1942,12 +1942,14 @@ function Show-Setup {
 
   Move-Item -LiteralPath $tmp -Destination $InstalledSelf -Force
 
-  if (-not (Write-Launcher $CommandName)) { Die "cannot write $BinDir\$CommandName.cmd" }
+  $shim = Join-Path $BinDir "$CommandName.cmd"
+  $aliasShim = Join-Path $BinDir "$AliasName.cmd"
+  if (-not (Write-Launcher $CommandName)) { Die "cannot write $shim" }
 
   Ok "installed $InstalledSelf"
-  Ok "command   $BinDir\$CommandName.cmd"
+  Ok "command   $shim"
   if (Write-Launcher $AliasName) {
-    Ok "alias     $BinDir\$AliasName.cmd"
+    Ok "alias     $aliasShim"
   } else {
     Warn "the $AliasName alias was not written - $CommandName still works"
   }
@@ -1967,6 +1969,10 @@ function Show-Setup {
     Say "    [Environment]::SetEnvironmentVariable('Path', `"$BinDir;`$env:Path`", 'User')"
     Say '  or rerun setup with -AddPath and this is done for you.'
   }
+
+  # A shell that was already open when the launcher was written keeps its own
+  # command list, so say how to refresh it rather than let the name look missing.
+  Say '  If the name does not tab-complete yet, open a new terminal.'
 }
 
 function Invoke-Update {

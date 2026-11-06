@@ -1829,6 +1829,11 @@ cmd_setup() {
     say "    echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> $(shell_rc)"
     say "  or rerun setup with --add-path and this is done for you."
   fi
+
+  # A shell that was already open when the launcher was written keeps its own
+  # command hash, so the name is there but does not tab-complete until the shell
+  # is refreshed. Saying so is cheaper than the confusion it saves.
+  say "  ${DIM}If the name does not tab-complete yet: rehash (zsh) or open a new terminal.${OFF}"
 }
 
 cmd_update() {

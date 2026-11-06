@@ -785,6 +785,11 @@ check(
 check('it installs the tool itself', fs.existsSync(path.join(cmdTree.home, 'freebuff-focus-linux.sh')), true);
 check('and says where both went', setup.stdout.includes(cmdTree.home) && setup.stdout.includes(shim), true);
 check('and does not patch anything yet', read(cmdTree.target) === CURRENT, true);
+check(
+  'and tells a stale shell how to see the command',
+  /rehash \(zsh\) or open a new terminal/.test(setup.stdout),
+  true
+);
 check('setup again is not an error', runStamped(cmdTree.tree, cmdTree.backups, 'setup').status, 0);
 
 const viaCommand = runCommand(cmdTree, 'version');
