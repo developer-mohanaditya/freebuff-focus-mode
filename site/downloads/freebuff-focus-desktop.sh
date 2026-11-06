@@ -60,7 +60,7 @@
 set -u
 
 # Stamped at build time (scripts/build-desktop.mjs).
-VERSION="1.9.8"
+VERSION="1.9.9"
 # The test suite points this at a file:// copy so update can be exercised without
 # the network. Nothing else sets it.
 ORIGIN="${FREEBUFF_FOCUS_ORIGIN:-https://freebuff-focusmode.vercel.app}"
@@ -1685,11 +1685,15 @@ function main(argv) {
   head.writeUInt32LE(4, 0);
   head.writeUInt32LE(newJlen + 8, 4);
   head.writeUInt32LE(newJlen + 4, 8);
-  head.writeUInt32LE(newJlen, 12);
+  // The length field is the JSON's own byte count, padding excluded: Electron
+  // reads exactly that many bytes as the header string, and a padded count makes
+  // it read the NUL pad as part of the JSON. archive.cc calls that "Failed to
+  // parse header" and the bundle does not start.
+  head.writeUInt32LE(json.length, 12);
   const out = Buffer.concat([head, json, Buffer.alloc(pad), ...parts]);
   fs.writeFileSync(asarPath + '.fbd-tmp', out);
   fs.renameSync(asarPath + '.fbd-tmp', asarPath);
-  console.log(JSON.stringify({ patched: true, shell: !shellDone, page: !pageDone, size: out.length, files: files.length, hash: headerHash(out, newJlen) }));
+  console.log(JSON.stringify({ patched: true, shell: !shellDone, page: !pageDone, size: out.length, files: files.length, hash: headerHash(out, json.length) }));
 }
 main(process.argv.slice(2));
 FBD_SHELL_JS

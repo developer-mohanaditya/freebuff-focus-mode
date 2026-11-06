@@ -143,12 +143,14 @@ function buildAsar(hwText, preloadText = SHELL_PRELOAD) {
   const header = { files: { electron: { files } } };
   const json = Buffer.from(JSON.stringify(header));
   const pad = (4 - (json.length % 4)) % 4;
+  // Same four fields as 0.0.201's own app.asar: the last one is the JSON's byte
+  // count, not the padded one, because Electron reads exactly that many bytes.
   const jlen = json.length + pad;
   const head = Buffer.alloc(16);
   head.writeUInt32LE(4, 0);
   head.writeUInt32LE(jlen + 8, 4);
   head.writeUInt32LE(jlen + 4, 8);
-  head.writeUInt32LE(jlen, 12);
+  head.writeUInt32LE(json.length, 12);
   return Buffer.concat([head, json, Buffer.alloc(pad), ...blobs.map(([, body]) => body)]);
 }
 
@@ -1154,6 +1156,40 @@ const startsRun = startRun(starts, 'install', '--restart', '--no-wait');
 check('a bundle that starts is started and said so', /started Freebuff/.test(startsRun.stdout));
 check('and its patch is left in place', count(read(starts.asar), 'FBD-ADS-OFF:dom-v1'), 1);
 check('and its hash still matches', headerHashOf(fs.readFileSync(starts.asar)), recordedHash(starts));
+
+// Electron reads the header string with the length from the fourth field, so a
+// padded count there makes it swallow the NUL pad and refuse the file - the
+// bundle dies before a line of it runs, with "Failed to parse header". The
+// fields are therefore checked against what 0.0.201 ships, not against this
+// tool's own reader, which is what let the two drift apart.
+const headerFields = (buf) => {
+  const w0 = buf.readUInt32LE(0);
+  const w1 = buf.readUInt32LE(4);
+  const w2 = buf.readUInt32LE(8);
+  const w3 = buf.readUInt32LE(12);
+  const base = 8 + w1;
+  const json = buf.slice(16, base).toString('utf8').replace(/\0+$/, '');
+  return { w0, w1, w2, w3, base, json };
+};
+
+const patchedAsar = fs.readFileSync(starts.asar);
+const hf = headerFields(patchedAsar);
+check('the header counts its own payload', hf.w0, 4);
+check('and that payload is the header block minus the count', hf.w2, hf.w1 - 4);
+check('and the files start on a 4-byte boundary', hf.base % 4, 0);
+check('and the length field is the JSON alone, padding excluded', hf.w3, Buffer.byteLength(hf.json));
+check(
+  'and exactly those bytes parse as the header',
+  (() => {
+    try {
+      return !!JSON.parse(patchedAsar.slice(16, 16 + hf.w3).toString('utf8'));
+    } catch (e) {
+      return false;
+    }
+  })()
+);
+check('and the recorded hash covers exactly the JSON', headerHashOf(patchedAsar), recordedHash(starts));
+
 
 // On some Macs the kernel kills a hand-started copy of the bundle (Killed: 9)
 // while the same bytes open fine from Finder. A direct start that dies is
