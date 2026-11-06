@@ -1,0 +1,46 @@
+#!/bin/sh
+# Reject agent/bot attribution in commit messages.
+#
+# The project policy (PROJECT-IDENTITY-POLICY.md) puts the owner in the author
+# and committer fields and forbids credit lines naming an AI agent, model,
+# platform or bot. Tools add those lines themselves, so this hook checks the
+# message that is about to be recorded rather than trusting the drafting step.
+#
+# Install per worktree:  git config --worktree core.hooksPath .githooks
+# Bypass (owner-only, discouraged): git commit --no-verify
+
+msg_file="$1"
+[ -n "$msg_file" ] && [ -f "$msg_file" ] || exit 0
+
+AGENTS='codebuff|freebuff|buffy|claude|cursor|chatgpt|openai|copilot|gemini|codex|devin|windsurf|aider|cline|continue|tabnine|sourcegraph|cody|qodo|jules|amp'
+
+status=0
+
+# Co-authored-by / Signed-off-by naming a tool or bot.
+if grep -nEi "^[[:space:]]*(co-authored-by|signed-off-by):.*($AGENTS)" "$msg_file" >/dev/null 2>&1; then
+  echo "commit-msg: the message credits an agent or bot in a trailer." >&2
+  status=1
+fi
+
+# "Generated with", "Created by", "Assisted by" credit lines and agent signatures.
+if grep -nEi "^[[:space:]]*(generated|created|assisted|written)[[:space:]]+(with|by)[[:space:]]+.*($AGENTS)|generated with .*https?://" "$msg_file" >/dev/null 2>&1; then
+  echo "commit-msg: the message carries an agent credit line." >&2
+  status=1
+fi
+
+# Robot signatures and promotional links.
+if grep -nE '(🤖|✔ Generated|_Generated with|Co-authored-by: .*<noreply@)' "$msg_file" >/dev/null 2>&1; then
+  echo "commit-msg: the message carries an agent signature." >&2
+  status=1
+fi
+
+if [ "$status" -ne 0 ]; then
+  cat >&2 <<'NOTE'
+The project policy (PROJECT-IDENTITY-POLICY.md) records the owner as the only
+author and committer. Remove the credit line and commit again; the author field
+already identifies the account that did the work.
+NOTE
+  exit 1
+fi
+
+exit 0
