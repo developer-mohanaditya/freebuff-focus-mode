@@ -60,7 +60,7 @@
 set -u
 
 # Stamped at build time (scripts/build-desktop.mjs).
-VERSION="1.9.9"
+VERSION="1.10.0"
 # The test suite points this at a file:// copy so update can be exercised without
 # the network. Nothing else sets it.
 ORIGIN="${FREEBUFF_FOCUS_ORIGIN:-https://freebuff-focusmode.vercel.app}"
@@ -444,6 +444,39 @@ launch_reason() {
   [ -n "$line" ] && printf '%s\n' "$line" | cut -c1-150
 }
 
+# A patch changes app.asar, and app.asar is one of the files the bundle's own
+# signature covers. A Mac that enforces that refuses to launch the modified copy,
+# which looks exactly like "the patch is broken". These answer it; 1 from
+# signature_ok also means only that nothing here can repair the signature.
+signature_ok() {
+  command -v codesign >/dev/null 2>&1 || return 1
+  codesign --verify --strict "$1" >/dev/null 2>&1
+}
+
+resign_app() {
+  command -v codesign >/dev/null 2>&1 || return 1
+  codesign --force --deep --sign - "$1" >/dev/null 2>&1
+}
+
+signature_word() {
+  if ! command -v codesign >/dev/null 2>&1; then
+    printf 'unknown (no codesign)\n'
+  elif signature_ok "$1"; then
+    printf 'valid\n'
+  else
+    printf 'broken - a written file is covered by it\n'
+  fi
+}
+
+# The last lines the app printed for itself, which is where a refusal says what it
+# refused. launch_reason picks one line for a summary; a reader who cannot open
+# the log needs the few around it too.
+launch_tail() {
+  log="$(launch_log)"
+  [ -s "$log" ] || return 0
+  grep -v '^[[:space:]]*$' "$log" 2>/dev/null | tail -n "${1:-3}" | cut -c1-160
+}
+
 # Put app.asar and Info.plist back the way the bundle shipped, then open it.
 # Only for bytes that have just been shown not to start: an app that will not
 # open is worse than an app with ads in it, and the ads can come off again once
@@ -490,10 +523,26 @@ rescue_app() {
   state="$(shell_state "$app")"
   patched=0
   case "$state" in patched|partial) patched=1 ;; esac
+
+  # Patching app.asar changes a file the bundle's signature covers, and a strict
+  # Mac kills that copy at launch. The start is repeated once with the bundle
+  # signed ad-hoc: when that is all it wanted, the patch stays and the ads stay
+  # off. Only a second failure puts the pristine bytes back.
+  if [ "$patched" = "1" ] && [ "${FREEBUFF_FOCUS_RESIGN:-1}" = "1" ] \
+     && ! signature_ok "$app" && resign_app "$app"; then
+    if probe_start "$app"; then
+      ok "it started once the bundle was signed again"
+      say "  ${DIM}This bundle is signed, and app.asar is one of the files that${OFF}"
+      say "  ${DIM}signature covers, so macOS refused the patched copy for it. It${OFF}"
+      say "  ${DIM}is signed ad-hoc now, which still starts. The patch is in place.${OFF}"
+      return 0
+    fi
+  fi
   if [ "$patched" = "1" ] && window_rollback "$app" "$version"; then
     printf '%s\n' "${reason:-it exited without a message}" > "$SESSION_DIR/launch.failed" 2>/dev/null || true
     warn "Freebuff would not start with the window stage applied, so app.asar and Info.plist were put back exactly as they were"
     [ -n "$reason" ] && say "  Freebuff said: ${DIM}$reason${OFF}"
+    launch_tail | while IFS= read -r line; do say "  ${DIM}$line${OFF}"; done
     if [ "${PROBE_KILLED:-0}" = "1" ]; then
       say "  ${DIM}macOS killed the start this tool makes by hand (Killed: 9) - a normal${OFF}"
       say "  ${DIM}launch did not keep it open either, so the bytes are the question.${OFF}"
@@ -2438,6 +2487,7 @@ cmd_doctor() {
     # and not what the tool was built against. The source is named because the
     # label alone used to read as the tool's version.
     say "  freebuff      $(app_version "$app")   (Contents/Info.plist)"
+    say "  signature     $(signature_word "$app")"
     say "  orchestrator  $target"
     if [ -f "$target" ]; then
       say "  size          $(wc -c < "$target" | tr -d ' ') bytes"
