@@ -291,6 +291,20 @@ ok('an unknown command is refused', unknown.code !== 0 && /unknown command/.test
 const help = run(['help'])
 ok('help prints usage', /focus/.test(help.out) && /unfocus/.test(help.out), help.out.trim().slice(0, 80))
 
+// A package manager's `freebuff` on PATH is usually a link to the real binary.
+// The patch has to land on the target and leave the link a link, or the upgrade
+// that follows would find a plain file where its symlink belonged.
+const linkTarget = fixture('link-target')
+const linkPath = path.join(work, 'freebuff-link')
+fs.symlinkSync(linkTarget, linkPath)
+const viaLink = run(['focus'], { bin: linkPath })
+eq('focus through a symlink exits 0', viaLink.code, 0)
+ok('the symlink is still a symlink', fs.lstatSync(linkPath).isSymbolicLink())
+ok('the target is the file that got patched', fs.readFileSync(linkTarget, 'utf8').includes('enabled:!1'))
+ok('the backup is named after the real file', fs.existsSync(path.join(stateDir, 'freebuff-9.9.9.orig')))
+const linkState = fs.readFileSync(path.join(stateDir, 'state.env'), 'utf8')
+ok('the state records the real path, not the link', linkState.includes(`BINARY=${linkTarget}`), linkState)
+
 const failed = results.filter((r) => !r).length
 console.log('')
 if (failed) {

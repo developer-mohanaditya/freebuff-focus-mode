@@ -234,16 +234,38 @@ default_binary() {
   return 1
 }
 
+# Follow symlinks to the file itself. A Homebrew or /usr/local/bin entry is
+# usually a link to the real binary; replacing the link would leave a plain file
+# where a package manager expects its link, so the patch always lands on the
+# target and the link keeps pointing at it.
+real_path() {
+  p="$1"
+  hops=0
+  while [ -L "$p" ] && [ "$hops" -lt 20 ]; do
+    link_dir="$(dirname "$p")"
+    link_target="$(readlink "$p")"
+    case "$link_target" in
+      /*) p="$link_target" ;;
+      *) p="$link_dir/$link_target" ;;
+    esac
+    hops=$((hops + 1))
+  done
+  if [ -d "$(dirname "$p")" ]; then
+    p="$(cd "$(dirname "$p")" && pwd -P)/$(basename "$p")"
+  fi
+  printf '%s\n' "$p"
+}
+
 resolve_binary() {
   if [ -n "$CLI_BIN" ]; then
     if [ ! -f "$CLI_BIN" ]; then
       die "no such file: $CLI_BIN"
     fi
-    printf '%s\n' "$CLI_BIN"
+    real_path "$CLI_BIN"
     return 0
   fi
   if path="$(default_binary)"; then
-    printf '%s\n' "$path"
+    real_path "$path"
     return 0
   fi
   die "could not find the Freebuff CLI binary - pass --bin <path> (see: $PROG doctor)"
