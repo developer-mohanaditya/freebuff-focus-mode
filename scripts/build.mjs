@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildDesktop } from './build-desktop.mjs';
+import { buildCli } from './build-cli.mjs';
 import { ensureIcons } from './png.mjs';
 import { createZip, walk } from './zip.mjs';
 
@@ -204,7 +205,7 @@ function writeUpdateXml(version, packageInfo) {
  * Substitutions are regexes over already-substituted values, so rebuilding
  * never drifts: run it twice and the output is identical.
  */
-function writeDist(version, packageInfo, storeInfo, firefoxInfo, desktop) {
+function writeDist(version, packageInfo, storeInfo, firefoxInfo, desktop, cli) {
   fs.rmSync(DIST_DIR, { recursive: true, force: true });
   fs.mkdirSync(DIST_DIR, { recursive: true });
 
@@ -304,6 +305,7 @@ function writeDist(version, packageInfo, storeInfo, firefoxInfo, desktop) {
         desktopWindowsZip: desktop ? desktop.windowsArchive.relativePath : null,
         desktopLinux: desktop ? desktop.linuxScript.relativePath : null,
         desktopLinuxZip: desktop ? desktop.linuxArchive.relativePath : null,
+        cli: cli ? cli.script.relativePath : null,
         origin: SITE_ORIGIN,
       },
       null,
@@ -326,10 +328,12 @@ export function build() {
   const { unpacked, store, firefox } = packageAll(version, manifest);
   writeUpdateXml(version, unpacked);
   const desktop = buildDesktop({ version, origin: SITE_ORIGIN });
-  writeDist(version, unpacked, store, firefox, desktop);
+  const cli = buildCli({ version, origin: SITE_ORIGIN });
+  writeDist(version, unpacked, store, firefox, desktop, cli);
 
   log(`v${version} - ${unpacked.fileCount} files, ${formatBytes(unpacked.bytes)}`);
   log(`desktop  patch tool ships as the same v${version}`);
+  log(`cli      site/${cli.script.relativePath}   (macOS and Linux, same v${version})`);
   log(`package  site/${unpacked.relativePath}   (load unpacked, Chromium)`);
   log(`package  site/${store.relativePath}   (Chrome Web Store, Edge Add-ons)`);
   log(`package  site/${firefox.relativePath}   (addons.mozilla.org)`);

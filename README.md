@@ -78,6 +78,25 @@ which restores the file, writes one line to `session.log` beside the session fil
 exits. It writes nothing at all if the file changed since the patch, so a Freebuff update
 makes it stand down instead of overwriting. `unfocus` stops it.
 
+**Freebuff CLI** (macOS, Linux): the terminal client is not a bundle that can be edited - it is a single compiled binary, so it has a tool of its own. Run it once, then again after each CLI update (an update installs a new binary, which arrives with ads).
+
+```sh
+curl -fsSL https://freebuff-focusmode.vercel.app/downloads/freebuff-cli-focus.sh | sh
+freebuff-cli-focus focus     # patch the binary, check it still starts, keep the original
+freebuff-cli-focus status    # is this CLI patched, and where is the backup?
+freebuff-cli-focus unfocus   # put the original bytes back
+```
+
+The patch is one expression inside the binary's embedded JavaScript: the switch
+that starts the ad hook (the answer cards and the dock above the input, and their
+impression reporting). The tool never matches the minified names around it, which
+differ between builds - it anchors on the ads call that survives them. The new
+binary is assembled beside the old one, re-signed ad-hoc on macOS, and run for
+`--version` before it replaces anything, and the original bytes are copied to
+`~/.local/share/freebuff-focus/cli` first, so a patch that does not start is never
+installed and `unfocus` restores the file exactly. Removing the CLI with
+`npm rm -g freebuff` removes the patched file too, so there is nothing left behind.
+
 ## How it works
 
 | Layer | Catches | When |
