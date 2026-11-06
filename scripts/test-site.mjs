@@ -169,7 +169,8 @@ const shown = (button) => !!button && button.hidden === false;
 console.log('\nno listing published');
 const none = open({ ua: CHROME, links: { chrome: '', firefox: '' } });
 check('no store button is offered', none.button, null);
-check('the desktop button is still there', label(none.heroLinks.at(-1)), 'For Desktop');
+check('the desktop button is still there', none.heroLinks.some((a) => label(a) === 'For Desktop'), true);
+check('and so is the CLI jump', none.heroLinks.some((a) => label(a) === 'For CLI'), true);
 check('the manual path is still on the page', none.zip !== null, true);
 
 /* -------------------------------------------------------- chrome and chromium */
@@ -179,8 +180,9 @@ const chrome = open({ ua: CHROME, links: { chrome: LISTINGS.chrome } });
 check('the button appears', shown(chrome.button), true);
 check('it names the browser', label(chrome.button), 'Add to Chrome');
 check('it points at the listing', href(chrome.button), LISTINGS.chrome);
-check('the hero is two buttons, not four', chrome.heroLinks.length, 2);
+check('the hero is three buttons, one per surface', chrome.heroLinks.length, 3);
 check('the second one is the desktop jump', href(chrome.heroLinks[1]), '#desktop');
+check('the third one is the CLI jump', href(chrome.heroLinks[2]), '#cli');
 
 console.log('\nedge listing, read in edge');
 const edge = open({ ua: EDGE, links: { edge: LISTINGS.edge } });
@@ -207,7 +209,7 @@ console.log('\nfirefox listing, read in firefox');
 const firefox = open({ ua: FIREFOX, links: { firefox: LISTINGS.firefox } });
 check('it names the browser', label(firefox.button), 'Add to Firefox');
 check('it points at addons.mozilla.org', href(firefox.button), LISTINGS.firefox);
-check('the same one button serves both engines', firefox.heroLinks.length, 2);
+check('the same buttons serve both engines', firefox.heroLinks.length, 3);
 
 console.log('\nbrowser with no listing of its own');
 const mismatched = open({ ua: FIREFOX, links: { chrome: LISTINGS.chrome, firefox: '' } });
@@ -232,7 +234,8 @@ check('brave is named by its own tell', label(brave.button), 'Add to Brave');
 console.log('\nsafari, with every listing live');
 const safari = open({ ua: SAFARI, links: LISTINGS });
 check('no button, because there is no build it could install', safari.button, null);
-check('safari still gets the desktop section', label(safari.heroLinks.at(-1)), 'For Desktop');
+check('safari still gets the desktop section', safari.heroLinks.some((a) => label(a) === 'For Desktop'), true);
+check('and safari gets the CLI jump too', safari.heroLinks.some((a) => a.getAttribute('href') === '#cli'), true);
 
 /* ---------------------------------------------------------------------- page */
 

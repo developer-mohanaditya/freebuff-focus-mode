@@ -61,6 +61,7 @@
                sees a button that leads nowhere. -->
           <a class="btn btn-primary" data-store-button hidden>Add to Chrome</a>
           <a class="btn btn-ghost" href="#desktop">For Desktop</a>
+          <a class="btn btn-ghost" href="#cli">For CLI</a>
         </div>
 
         <ul class="facts" role="list">
@@ -795,14 +796,16 @@
         <div class="scope-note reveal">
           <span class="scope-label">Scope</span>
           <p>
-            Two apps, one idea, one focus flip each, because neither can reach the other. The
-            <strong>web version</strong> is covered by the extension above, which a browser can
-            only reach because Chromium renders the page. The <strong>desktop app</strong> is a
-            separate bundle with no extension surface, so it is covered by the local tool in
-            <a href="#desktop">For Desktop</a> instead: one build per platform, macOS, Windows and
-            Linux. Neither has a server, an account or a telemetry endpoint, and neither touches
-            anything outside freebuff.com and your own machine. Sessions are local, manual, and
-            reversible.
+            Three surfaces, one idea, one focus flip each, because none of them can reach the
+            others. The <strong>web version</strong> is covered by the extension above, which a
+            browser can only reach because Chromium renders the page. The
+            <strong>desktop app</strong> is a separate bundle with no extension surface, so it is
+            covered by the local tool in <a href="#desktop">For Desktop</a>: one build per
+            platform, macOS, Windows and Linux. The <strong>terminal client</strong> is one
+            compiled binary with no extension surface either, so it is covered by
+            <a href="#cli">the CLI tool</a>. None of them has a server, an account or a telemetry
+            endpoint, and none touches anything outside freebuff.com and your own machine.
+            Sessions are local, manual, and reversible.
           </p>
         </div>
       </section>
