@@ -78,13 +78,17 @@ which restores the file, writes one line to `session.log` beside the session fil
 exits. It writes nothing at all if the file changed since the patch, so a Freebuff update
 makes it stand down instead of overwriting. `unfocus` stops it.
 
-**Freebuff CLI** (macOS, Linux): the terminal client is not a bundle that can be edited - it is a single compiled binary, so it has a tool of its own. Run it once, then again after each CLI update (an update installs a new binary, which arrives with ads).
+**Freebuff CLI** (macOS, Linux): the terminal client is not a bundle that can be edited - it is a single compiled binary, so it has a tool of its own. The one-liner installs a `freebuff-cli-focus` command, then patches; run `focus` again after each CLI update (an update installs a new binary, which arrives with ads).
 
 ```sh
-curl -fsSL https://freebuff-focusmode.vercel.app/downloads/freebuff-cli-focus.sh | sh
-freebuff-cli-focus focus     # patch the binary, check it still starts, keep the original
-freebuff-cli-focus status    # is this CLI patched, and where is the backup?
-freebuff-cli-focus unfocus   # put the original bytes back
+curl -fsSL https://freebuff-focusmode.vercel.app/downloads/freebuff-cli-focus.sh | sh   # install + patch
+freebuff-cli-focus focus        # patch the binary, check it still starts, keep the original
+freebuff-cli-focus focus 25m    # quiet for 25 minutes, then the original bytes go back
+freebuff-cli-focus status       # is this CLI patched, and where is the backup?
+freebuff-cli-focus scan         # what this build contains, read-only
+freebuff-cli-focus update       # newer tool: download it, replace the copy, patch again
+freebuff-cli-focus uninstall    # remove the command and the copy, leave the patch
+freebuff-cli-focus unfocus      # put the original bytes back, and stop a timed focus
 ```
 
 The patch is one expression inside the binary's embedded JavaScript: the switch
@@ -94,7 +98,9 @@ differ between builds - it anchors on the ads call that survives them. The new
 binary is assembled beside the old one, re-signed ad-hoc on macOS, and run for
 `--version` before it replaces anything, and the original bytes are copied to
 `~/.local/share/freebuff-focus/cli` first, so a patch that does not start is never
-installed and `unfocus` restores the file exactly. Removing the CLI with
+installed and `unfocus` restores the file exactly. A timed focus starts one
+detached watcher that stands down if the binary changed underneath it, so a
+Freebuff update is never overwritten with an older build. Removing the CLI with
 `npm rm -g freebuff` removes the patched file too, so there is nothing left behind.
 
 ## How it works

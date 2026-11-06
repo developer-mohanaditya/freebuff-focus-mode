@@ -57,6 +57,13 @@ function eq(name, actual, expected) {
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'fbd-cli-'))
 const stateDir = path.join(work, 'state')
+const binDir = path.join(work, 'bin')
+const homeDir = path.join(work, 'home')
+const installDir = path.join(work, 'install')
+const toolOrigin = path.join(work, 'origin')
+fs.mkdirSync(homeDir, { recursive: true })
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
  * A stand-in for the compiled CLI: a real program (`--version`) with the
@@ -84,7 +91,7 @@ function fixture(name, { body = '', version = '9.9.9' } = {}) {
   return file
 }
 
-function run(args, { bin } = {}) {
+function run(args, { bin, env } = {}) {
   const argv = [TOOL]
   if (bin) argv.push('--bin', bin)
   argv.push(...args)
@@ -92,9 +99,14 @@ function run(args, { bin } = {}) {
     encoding: 'utf8',
     env: {
       ...process.env,
+      HOME: homeDir,
+      SHELL: '/bin/sh',
       FREEBUFF_FOCUS_CLI_STATE: stateDir,
+      FREEBUFF_FOCUS_CLI_HOME: installDir,
+      FREEBUFF_FOCUS_BIN_DIR: binDir,
       FREEBUFF_FOCUS_NODE: process.execPath,
       XDG_DATA_HOME: path.join(work, 'xdg'),
+      ...env,
     },
   })
   return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
@@ -304,6 +316,95 @@ ok('the target is the file that got patched', fs.readFileSync(linkTarget, 'utf8'
 ok('the backup is named after the real file', fs.existsSync(path.join(stateDir, 'freebuff-9.9.9.orig')))
 const linkState = fs.readFileSync(path.join(stateDir, 'state.env'), 'utf8')
 ok('the state records the real path, not the link', linkState.includes(`BINARY=${linkTarget}`), linkState)
+
+// --- install, scan, update, uninstall --------------------------------------
+
+const installTarget = fixture('install-target', { version: '3.3.3' })
+const installedCopy = path.join(installDir, 'freebuff-cli-focus.sh')
+const shimPath = path.join(binDir, 'freebuff-cli-focus')
+
+const installRun = run(['install'], { bin: installTarget })
+eq('install exits 0', installRun.code, 0)
+ok('install writes the installed copy', fs.existsSync(installedCopy))
+ok('install writes the command', fs.existsSync(shimPath) && (fs.statSync(shimPath).mode & 0o111) !== 0)
+ok('install patches the binary it was given', fs.readFileSync(installTarget, 'utf8').includes('enabled:!1'))
+ok('install says how to put the folder on PATH', /not on PATH/.test(installRun.out), installRun.out.trim())
+
+const statusInstalled = run(['status'], { bin: installTarget })
+ok('status names the installed command', /command/.test(statusInstalled.out), statusInstalled.out.trim())
+
+const scanTarget = fixture('scan-target', { version: '3.3.4' })
+const scanSha = sha(scanTarget)
+const scanRun = run(['scan'], { bin: scanTarget })
+eq('scan exits 0', scanRun.code, 0)
+ok('scan names the anchor offset', /offset \d+/.test(scanRun.out), scanRun.out.trim())
+ok('scan prints the expression it found', /expression/.test(scanRun.out), scanRun.out.trim())
+eq('scan does not touch the binary', sha(scanTarget), scanSha)
+ok('scan saves its report', fs.existsSync(path.join(stateDir, 'scan-3.3.4.txt')))
+
+// The site is a file:// copy, so update runs without the network.
+const siteDir = path.join(toolOrigin, 'downloads')
+fs.mkdirSync(siteDir, { recursive: true })
+const siteTool = fs.readFileSync(TOOL, 'utf8')
+const publish = (version) =>
+  fs.writeFileSync(
+    path.join(siteDir, 'freebuff-cli-focus.sh'),
+    siteTool.replace(/^VERSION=".*"$/m, `VERSION="${version}"`),
+    { mode: 0o755 },
+  )
+
+publish('3.3.9')
+const updateRun = run(['update'], { bin: installTarget, env: { FREEBUFF_FOCUS_ORIGIN: `file://${toolOrigin}` } })
+eq('update exits 0', updateRun.code, 0)
+ok('update reports the version it installed', /3\.3\.9/.test(updateRun.out), updateRun.out.trim())
+ok('update keeps the previous copy', fs.existsSync(`${installedCopy}.prev`))
+ok('update really installed the newer tool', /VERSION="3\.3\.9"/.test(fs.readFileSync(installedCopy, 'utf8')))
+
+publish('1.0.0')
+const downgrade = run(['update'], { bin: installTarget, env: { FREEBUFF_FOCUS_ORIGIN: `file://${toolOrigin}` } })
+ok('update refuses a downgrade', downgrade.code !== 0 && /older than/.test(downgrade.out), downgrade.out.trim())
+
+const addPathRun = run(['install', '--add-path'], {
+  bin: fixture('add-path-target', { version: '3.3.5' }),
+  env: { SHELL: '/bin/bash' },
+})
+eq('install --add-path exits 0', addPathRun.code, 0)
+ok(
+  'install --add-path edits the shell rc once',
+  (fs.readFileSync(path.join(homeDir, '.bashrc'), 'utf8').match(/freebuff-cli-focus PATH/g) || []).length === 1,
+  'marker missing or duplicated',
+)
+
+const patchedBeforeUninstall = sha(installTarget)
+const uninstallRun = run(['uninstall'])
+eq('uninstall exits 0', uninstallRun.code, 0)
+ok('uninstall removes the command', !fs.existsSync(shimPath))
+ok('uninstall removes the installed copy', !fs.existsSync(installedCopy) && !fs.existsSync(`${installedCopy}.prev`))
+eq('uninstall leaves the patch alone', sha(installTarget), patchedBeforeUninstall)
+ok('uninstall says how to restore the ads', /unfocus/.test(uninstallRun.out), uninstallRun.out.trim())
+
+// --- a timed focus puts the original back ----------------------------------
+
+const timedTarget = fixture('timed-target', { version: '4.4.4' })
+const timedSha = sha(timedTarget)
+const timedRun = run(['focus', '2s'], { bin: timedTarget })
+eq('a timed focus exits 0', timedRun.code, 0)
+ok('a timed focus says when the ads come back', /ads come back in 2s/.test(timedRun.out), timedRun.out.trim())
+ok('a timed focus leaves a watcher', fs.existsSync(path.join(stateDir, 'watch.pid')))
+
+await sleep(5000)
+eq('the watcher restored the original bytes', sha(timedTarget), timedSha)
+ok('the watcher cleans up after itself', !fs.existsSync(path.join(stateDir, 'watch.pid')))
+ok('the watcher logged what it did', fs.readFileSync(path.join(stateDir, 'session.log'), 'utf8').includes('restored'))
+
+const stopTarget = fixture('stop-target', { version: '4.4.5' })
+const stopRun = run(['focus', '10m'], { bin: stopTarget })
+eq('a ten-minute focus exits 0', stopRun.code, 0)
+ok('a timed focus names its watcher', /watcher pid \d+/.test(stopRun.out), stopRun.out.trim())
+const stopUnfocus = run(['unfocus'], { bin: stopTarget })
+eq('unfocus exits 0 after a timed focus', stopUnfocus.code, 0)
+ok('unfocus stops the watcher', /stopped the timed focus/.test(stopUnfocus.out), stopUnfocus.out.trim())
+ok('no watcher is left behind', !fs.existsSync(path.join(stateDir, 'watch.pid')))
 
 const failed = results.filter((r) => !r).length
 console.log('')

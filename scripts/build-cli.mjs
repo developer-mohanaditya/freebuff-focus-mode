@@ -6,7 +6,9 @@
  * One file, one artifact: the tool carries its own patch engine and is what the
  * install line fetches, so there is nothing to zip. The version is the app's
  * version, handed in by build.mjs - the CLI tool, the extension and the desktop
- * tools are one product released under one number.
+ * tools are one product released under one number. The origin is the same site
+ * origin the desktop tools get: `install`, `update` and the piped hints all
+ * fetch from it, and a checkout has no business naming a host of its own.
  */
 
 import fs from 'node:fs';
@@ -20,17 +22,23 @@ const DOWNLOADS_DIR = path.join(ROOT, 'site', 'downloads');
 const SOURCE = 'freebuff-cli-focus.sh';
 const SCRIPT_NAME = 'freebuff-cli-focus.sh';
 
-export function buildCli({ version }) {
+export function buildCli({ version, origin }) {
   if (!version) throw new Error('buildCli needs the app version');
+  if (!origin) throw new Error('buildCli needs the site origin');
 
   const source = path.join(CLI_DIR, SOURCE);
   if (!fs.existsSync(source)) {
     throw new Error(`cli/${SOURCE} is missing - nothing to package`);
   }
 
-  const stamped = fs.readFileSync(source, 'utf8').replaceAll('__FBD_VERSION__', version);
-  if (stamped.includes('__FBD_VERSION__')) {
-    throw new Error(`cli/${SOURCE} still carries a version placeholder`);
+  const stamped = fs
+    .readFileSync(source, 'utf8')
+    .replaceAll('__FBD_VERSION__', version)
+    .replaceAll('__FBD_ORIGIN__', origin);
+
+  const leftover = stamped.match(/__FBD_[A-Z]+__/);
+  if (leftover) {
+    throw new Error(`cli/${SOURCE} still carries the ${leftover[0]} placeholder`);
   }
 
   fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
