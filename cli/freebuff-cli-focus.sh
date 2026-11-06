@@ -1051,6 +1051,11 @@ cmd_install() {
     say "  or rerun install with --add-path and this is done for you."
   fi
 
+  # A shell that was already open when the launcher was written keeps its own
+  # command hash, so the name is there but does not tab-complete until refreshed.
+  # This has to print before the patch step, which returns on its own.
+  say "  If the name does not tab-complete yet: rehash (zsh) or open a new terminal."
+
   say ""
   # Patch through the installed copy, so the code that writes the patch is the
   # code that was just installed rather than the one that happened to run.
@@ -1064,9 +1069,6 @@ cmd_install() {
   bad "the tool is installed, but patching failed - see the message above."
   say "  Try: $COMMAND_NAME doctor"
   return 1
-  # A shell that was already open when the launcher was written keeps its own
-  # command hash, so the name is there but does not tab-complete until refreshed.
-  say "  If the name does not tab-complete yet: rehash (zsh) or open a new terminal."
 }
 
 # Replace the installed copy with whatever the site serves now, keeping the old
