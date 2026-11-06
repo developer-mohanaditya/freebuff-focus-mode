@@ -90,6 +90,9 @@ HAVE_LOCAL=0
 INSTALL_DIR="${FREEBUFF_FOCUS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/freebuff-focus}"
 BIN_DIR="${FREEBUFF_FOCUS_BIN_DIR:-$HOME/.local/bin}"
 COMMAND_NAME="freebuff-focusmode"
+# The short form, written beside the long one on setup and removed with it on
+# uninstall. Both names run the same installed file.
+ALIAS_NAME="freebuff-focus"
 INSTALLED_SELF="$INSTALL_DIR/freebuff-focus-linux.sh"
 
 # The backup folder keeps its 1.6 name on purpose: renaming it would orphan every
@@ -1759,6 +1762,24 @@ version_newer() {
   }'
 }
 
+# A launcher is one line plus the name it answers to. Both the long command and
+# the short alias get the same launcher, and a file this tool did not write is
+# left alone.
+write_shim() {
+  # $1 = the name to write in $BIN_DIR
+  name="$1"
+  shim="$BIN_DIR/$name"
+  marker="# Freebuff Focus launcher - written by \`$COMMAND_NAME setup\`."
+  if [ -e "$shim" ] && ! grep -qF "$marker" "$shim" 2>/dev/null; then
+    warn "$shim already exists and was not written by this tool - left alone"
+    return 1
+  fi
+  printf '#!/bin/sh\n%s\nexec sh "%s" "$@"\n' \
+    "$marker" "$INSTALLED_SELF" >"$shim" 2>/dev/null || return 1
+  chmod 755 "$shim" 2>/dev/null || return 1
+  return 0
+}
+
 # Install the tool and the command that runs it. The first `curl | sh` does this,
 # so the reader gets `freebuff-focusmode status` instead of a file they have to
 # name and a path they have to remember.
@@ -1787,14 +1808,15 @@ cmd_setup() {
   chmod 755 "$tmp" 2>/dev/null || true
   mv "$tmp" "$INSTALLED_SELF" || { rm -f "$tmp"; die "cannot install to $INSTALLED_SELF"; }
 
-  shim="$BIN_DIR/$COMMAND_NAME"
-  printf '#!/bin/sh\n# Freebuff Focus launcher - written by `%s setup`.\nexec sh "%s" "$@"\n' \
-    "$COMMAND_NAME" "$INSTALLED_SELF" >"$shim" 2>/dev/null \
-    || die "cannot write $shim"
-  chmod 755 "$shim" 2>/dev/null || die "cannot make $shim executable"
+  write_shim "$COMMAND_NAME" || die "cannot write $BIN_DIR/$COMMAND_NAME"
 
   ok "installed $INSTALLED_SELF"
-  ok "command   $shim"
+  ok "command   $BIN_DIR/$COMMAND_NAME"
+  if write_shim "$ALIAS_NAME"; then
+    ok "alias     $BIN_DIR/$ALIAS_NAME"
+  else
+    warn "the $ALIAS_NAME alias was not written - $COMMAND_NAME still works"
+  fi
 
   if path_has_bin; then
     say "  ${DIM}$BIN_DIR is already on PATH${OFF}"
@@ -1860,8 +1882,10 @@ cmd_update() {
 
 cmd_uninstall() {
   shim="$BIN_DIR/$COMMAND_NAME"
+  alias_shim="$BIN_DIR/$ALIAS_NAME"
   removed=0
   if [ -f "$shim" ]; then rm -f "$shim" && { ok "removed $shim"; removed=1; }; fi
+  if [ -f "$alias_shim" ]; then rm -f "$alias_shim" && { ok "removed $alias_shim"; removed=1; }; fi
   if [ -f "$INSTALLED_SELF" ]; then
     rm -f "$INSTALLED_SELF" "$INSTALLED_SELF.prev" && { ok "removed $INSTALLED_SELF"; removed=1; }
   fi
@@ -1938,6 +1962,7 @@ cmd_doctor() {
   say "  pgrep / ps    $(command -v pgrep >/dev/null 2>&1 && echo pgrep || echo 'pgrep MISSING') / $(command -v ps >/dev/null 2>&1 && echo ps || echo 'ps MISSING')"
   say "  work dir      $WORK_DIR"
   say "  backup dir    $BACKUP_DIR"
+  say "  commands      $COMMAND_NAME, $ALIAS_NAME (in $BIN_DIR)"
   say ""
 
   kind=""; path=""; tree=""; dest=""

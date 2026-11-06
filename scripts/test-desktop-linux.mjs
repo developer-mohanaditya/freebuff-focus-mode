@@ -774,6 +774,14 @@ const shim = path.join(cmdTree.bin, 'freebuff-focusmode');
 check('setup exits 0', setup.status, 0);
 check('it writes the command', fs.existsSync(shim), true);
 check('the command is executable', (fs.statSync(shim).mode & 0o111) !== 0, true);
+const alias = path.join(cmdTree.bin, 'freebuff-focus');
+check('the short alias is written beside it', fs.existsSync(alias), true);
+check('the alias is executable too', (fs.statSync(alias).mode & 0o111) !== 0, true);
+check(
+  'and runs the same tool',
+  spawnSync(alias, ['version'], { encoding: 'utf8' }).stdout.includes(`freebuff-focus-desktop-linux ${FIXTURE_VERSION}`),
+  true
+);
 check('it installs the tool itself', fs.existsSync(path.join(cmdTree.home, 'freebuff-focus-linux.sh')), true);
 check('and says where both went', setup.stdout.includes(cmdTree.home) && setup.stdout.includes(shim), true);
 check('and does not patch anything yet', read(cmdTree.target) === CURRENT, true);
@@ -822,6 +830,7 @@ check('and the installed copy is untouched', read(path.join(updateTree.home, 'fr
 const removed = runCommand(updateTree, 'uninstall');
 check('uninstall exits 0', removed.status, 0);
 check('it removes the command', fs.existsSync(path.join(updateTree.bin, 'freebuff-focusmode')), false);
+check('and the short alias with it', fs.existsSync(path.join(updateTree.bin, 'freebuff-focus')), false);
 check('and the installed copy', fs.existsSync(path.join(updateTree.home, 'freebuff-focus-linux.sh')), false);
 check('and says the patch is still applied', /patch is still applied/.test(removed.stdout), true);
 check('and the patch really is still applied', count(read(updateTree.target), '/*FBD-ADS-OFF:render*/'), 1);

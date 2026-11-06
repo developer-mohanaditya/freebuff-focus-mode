@@ -980,10 +980,30 @@ const shim = path.join(inst.bin, 'freebuff-focusmode');
 check('setup exits 0', setup.status, 0);
 check('it writes the command', fs.existsSync(shim));
 check('the command is executable', (fs.statSync(shim).mode & 0o111) !== 0);
+const alias = path.join(inst.bin, 'freebuff-focus');
+check('the short alias is written beside it', fs.existsSync(alias));
+check('the alias is executable too', (fs.statSync(alias).mode & 0o111) !== 0);
+check(
+  'and runs the same tool',
+  spawnSync(alias, ['version'], { encoding: 'utf8' }).stdout.includes(`freebuff-focus-desktop ${FIXTURE_VERSION}`)
+);
 check('it installs the tool itself', fs.existsSync(path.join(inst.home, 'freebuff-focus.sh')));
 check('and says where both went', setup.stdout.includes(inst.home) && setup.stdout.includes(shim));
 check('and does not patch anything yet', read(inst.target) === CURRENT);
 check('setup again is not an error', runStamped(inst.app, inst.backups, 'setup').status, 0);
+
+// A name that is already someone else's command stays theirs.
+const foreign = makeBundle();
+fs.mkdirSync(foreign.bin, { recursive: true });
+const own = path.join(foreign.bin, 'freebuff-focus');
+fs.writeFileSync(own, '#!/bin/sh\necho mine\n');
+const foreignSetup = runStamped(foreign.app, foreign.backups, 'setup');
+check('a file that is not ours is left alone', read(own), '#!/bin/sh\necho mine\n');
+check('and the long command is still installed', fs.existsSync(path.join(foreign.bin, 'freebuff-focusmode')));
+check(
+  'and setup says it left it alone',
+  /was not written by this tool/.test(`${foreignSetup.stdout}${foreignSetup.stderr}`)
+);
 
 const viaCommand = runCommand(inst, 'version');
 check('the command runs the tool', viaCommand.status, 0);
@@ -1032,6 +1052,7 @@ check('and the installed copy is untouched', read(path.join(fresh.home, 'freebuf
 const removed = runCommand(fresh, 'uninstall');
 check('uninstall exits 0', removed.status, 0);
 check('it removes the command', fs.existsSync(path.join(fresh.bin, 'freebuff-focusmode')), false);
+check('and the short alias with it', fs.existsSync(path.join(fresh.bin, 'freebuff-focus')), false);
 check('and the installed copy', fs.existsSync(path.join(fresh.home, 'freebuff-focus.sh')), false);
 check('and says the patch is still applied', /patch is still applied/.test(removed.stdout));
 check('and the patch really is still applied', count(read(fresh.target), '/*FBD-ADS-OFF:render*/'), 1);

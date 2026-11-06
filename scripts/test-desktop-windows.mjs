@@ -747,6 +747,8 @@ const launcher = path.join(cmdInstall.bin, 'freebuff-focusmode.cmd');
 check('setup exits 0', setup.status, 0);
 check('it writes the launcher', fs.existsSync(launcher));
 check('the launcher runs the installed copy', fs.existsSync(path.join(cmdInstall.home, 'freebuff-focus.ps1')));
+check('and the short alias is written beside it', fs.existsSync(path.join(cmdInstall.bin, 'freebuff-focus.cmd')));
+check('the alias passes arguments through too', read(path.join(cmdInstall.bin, 'freebuff-focus.cmd')).includes('%*'));
 check('and passes its arguments through', read(launcher).includes('%*'));
 check('and says where both went', setup.stdout.includes(cmdInstall.home) && setup.stdout.includes(launcher));
 check('and does not patch anything yet', read(cmdInstall.target) === CURRENT);
@@ -789,6 +791,7 @@ check('and the installed copy is untouched', read(path.join(freshInstall.home, '
 const removed = runInstalled(freshInstall, 'uninstall');
 check('uninstall exits 0', removed.status, 0);
 check('it removes the launcher', fs.existsSync(path.join(freshInstall.bin, 'freebuff-focusmode.cmd')), false);
+check('and the short alias with it', fs.existsSync(path.join(freshInstall.bin, 'freebuff-focus.cmd')), false);
 check('and the installed copy', fs.existsSync(path.join(freshInstall.home, 'freebuff-focus.ps1')), false);
 check('and says the patch is still applied', /patch is still applied/.test(removed.stdout));
 check('and the patch really is still applied', count(read(freshInstall.target), '/*FBD-ADS-OFF:render*/'), 1);

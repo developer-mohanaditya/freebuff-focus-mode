@@ -100,6 +100,9 @@ if ($env:FREEBUFF_FOCUS_HOME) { $InstallDir = $env:FREEBUFF_FOCUS_HOME }
 $BinDir = Join-Path $InstallDir 'bin'
 if ($env:FREEBUFF_FOCUS_BIN_DIR) { $BinDir = $env:FREEBUFF_FOCUS_BIN_DIR }
 $CommandName = 'freebuff-focusmode'
+# The short form, written beside the long one on setup and removed with it on
+# uninstall.
+$AliasName = 'freebuff-focus'
 $InstalledSelf = Join-Path $InstallDir 'freebuff-focus.ps1'
 $AddPath = $false
 $Force = $false
@@ -1893,6 +1896,24 @@ function Test-VersionNewer {
   }
 }
 
+function Write-Launcher {
+  # Both names get the same batch file. A launcher this tool did not write is
+  # left alone: someone's own freebuff-focus.cmd is theirs, not ours.
+  param([string]$Name)
+  $shim = Join-Path $BinDir "$Name.cmd"
+  $marker = 'rem Freebuff Focus launcher'
+  $body = "@echo off`r`n$marker - written by $CommandName setup.`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$InstalledSelf`" %*`r`n"
+  if (Test-Path -LiteralPath $shim -PathType Leaf) {
+    $existing = Get-Content -LiteralPath $shim -Raw -ErrorAction SilentlyContinue
+    if ($existing -notlike "*$marker*") {
+      Warn "$shim already exists and was not written by this tool - left alone"
+      return $false
+    }
+  }
+  try { [System.IO.File]::WriteAllText($shim, $body) } catch { return $false }
+  return $true
+}
+
 function Show-Setup {
   New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
   New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
@@ -1922,11 +1943,16 @@ function Show-Setup {
   Move-Item -LiteralPath $tmp -Destination $InstalledSelf -Force
 
   $shim = Join-Path $BinDir "$CommandName.cmd"
-  $body = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$InstalledSelf`" %*`r`n"
-  try { [System.IO.File]::WriteAllText($shim, $body) } catch { Die "cannot write $shim" }
+  $aliasShim = Join-Path $BinDir "$AliasName.cmd"
+  if (-not (Write-Launcher $CommandName)) { Die "cannot write $shim" }
 
   Ok "installed $InstalledSelf"
   Ok "command   $shim"
+  if (Write-Launcher $AliasName) {
+    Ok "alias     $aliasShim"
+  } else {
+    Warn "the $AliasName alias was not written - $CommandName still works"
+  }
 
   if (Test-PathHasBin) {
     Say "  $BinDir is already on PATH"
@@ -1991,6 +2017,12 @@ function Invoke-Uninstall {
   if (Test-Path -LiteralPath $shim -PathType Leaf) {
     Remove-Item -LiteralPath $shim -Force
     Ok "removed $shim"
+    $removed = $true
+  }
+  $aliasShim = Join-Path $BinDir "$AliasName.cmd"
+  if (Test-Path -LiteralPath $aliasShim -PathType Leaf) {
+    Remove-Item -LiteralPath $aliasShim -Force
+    Ok "removed $aliasShim"
     $removed = $true
   }
   if (Test-Path -LiteralPath $InstalledSelf -PathType Leaf) {
