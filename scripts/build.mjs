@@ -250,6 +250,13 @@ function writeDist(version, packageInfo, storeInfo, firefoxInfo, desktop, cli) {
       .replace(
         /(<code data-desktop-linux-command>)[^<]*(<\/code>)/g,
         `$1curl -fsSL ${SITE_ORIGIN}/${desktop.linuxScript.relativePath} | sh$2`
+      )
+      // The terminal client has its own one-liner on the same page, so it is
+      // stamped from the same origin rather than left as a literal that would
+      // survive an origin change and point at the old host.
+      .replace(
+        /(<code data-cli-command>)[^<]*(<\/code>)/g,
+        `$1curl -fsSL ${SITE_ORIGIN}/${cli.script.relativePath} | sh$2`
       );
 
   // Every page, not just index.html. The navbar and footer carry the versions

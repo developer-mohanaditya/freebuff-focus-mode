@@ -701,6 +701,95 @@
         </div>
       </section>
 
+      <!-- ------------------------------------------------------------------- cli -->
+      <!-- The terminal client. Deliberately not a platform switch: the CLI tool
+           ships for macOS and Linux with the same one-liner, so there is no
+           third panel to choose between and no `data-platform` attributes to
+           add to the switch above. -->
+      <section class="section" id="cli">
+        <div class="section-head reveal">
+          <p class="eyebrow">Terminal</p>
+          <h2>The terminal client, with the same switch</h2>
+          <p class="section-sub">
+            Freebuff's CLI is not a folder of files - it is one compiled binary with the client's
+            JavaScript stored inside it, so an extension cannot reach it any more than it can
+            reach the desktop app. This tool patches the single expression that starts the ad
+            hook, keeps the original bytes, and puts them back when you ask. It has the same
+            commands as the desktop tool, the same rules: nothing sent anywhere, ads on by
+            default, one command to undo.
+          </p>
+        </div>
+
+        <div class="split">
+          <div class="panel reveal">
+            <h3>Run it</h3>
+            <p>
+              One line, and nothing to install first beyond the <code>node</code> the Freebuff CLI
+              already needs. It puts the tool in <code>~/.local/share/freebuff-focus/cli</code>,
+              writes a <code>freebuff-cli-focus</code> command into <code>~/.local/bin</code>, and
+              patches the CLI binary in place, so curl is not needed again.
+            </p>
+            <div class="copy-row">
+              <code data-cli-command>curl -fsSL https://freebuff-focusmode.vercel.app/downloads/freebuff-cli-focus.sh | sh</code>
+              <button type="button" class="copy" data-copy>Copy</button>
+            </div>
+            <p class="fine">
+              From then on: <code>freebuff-cli-focus focus</code> turns the ads off until you run
+              <code>freebuff-cli-focus unfocus</code>, <code>freebuff-cli-focus focus 25m</code> turns them off until
+              the deadline and then restores the file itself,
+              <code>freebuff-cli-focus status</code> reports what is applied without changing
+              anything, <code>freebuff-cli-focus scan</code> prints what this build contains,
+              <code>freebuff-cli-focus verify</code> answers patched-or-not with an exit code,
+              <code>freebuff-cli-focus doctor</code> explains where the binary is and what the
+              tool would do, <code>freebuff-cli-focus update</code> fetches a newer tool, replaces
+              this copy and patches again, and
+              <code>freebuff-cli-focus uninstall</code> removes the command while leaving the
+              patch, and therefore the undo, in place.
+            </p>
+            <p class="fine">
+              If <code>~/.local/bin</code> is not on your <code>PATH</code>, the installer prints
+              the one line that adds it; rerun with <code>--add-path</code> and it edits your
+              shell rc for you. Piping always needs <code>sh -s &lt;command&gt;</code>:
+              <code>| sh status</code> asks <code>sh</code> for a file called <code>status</code>.
+            </p>
+            <p class="fine">
+              Tool v<span data-version>1.12.0</span>, for the macOS and Linux CLI. The patch is one
+              expression inside the binary: the switch that starts the ad hook, which covers the
+              answer cards, the dock above the input and their impression calls. The patched copy
+              is assembled beside the original, re-signed ad-hoc on macOS, and run for
+              <code>--version</code> before it replaces anything, so a patch that does not start
+              is never installed, and <code>freebuff-cli-focus unfocus</code> restores the original exactly.
+            </p>
+          </div>
+
+          <div class="panel reveal">
+            <h3>After you run it</h3>
+            <ol class="mini-steps">
+              <li>
+                <strong>The binary is patched, not rewritten.</strong> The replacement is the same
+                length as the expression it replaces, so the file keeps its size and every offset
+                inside it stays where the CLI expects it.
+              </li>
+              <li>
+                <strong>A timed focus ends by itself.</strong> <code>focus 25m</code> leaves one
+                detached watcher that puts the original bytes back at the deadline, and stands
+                down if a Freebuff update replaced the binary first. <code>freebuff-cli-focus unfocus</code> stops it
+                early.
+              </li>
+              <li>
+                <strong>An update arrives unpatched.</strong> A new Freebuff CLI is a new binary,
+                so run <code>focus</code> again after updating. The backup is kept per version,
+                so the older one can still be restored.
+              </li>
+              <li>
+                <strong>Windows is not covered.</strong> The tool refuses a Windows binary rather
+                than guess at it.
+              </li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
       <!-- ----------------------------------------------------------------- scope -->
       <section class="section">
         <div class="scope-note reveal">
@@ -740,6 +829,7 @@
           <a href="#how">How it works</a>
           <a href="#install">Install</a>
           <a href="#desktop">Desktop app</a>
+          <a href="#cli">CLI tool</a>
           <a href="#updates">Updates</a>
         </div>
         <div class="footer-col">

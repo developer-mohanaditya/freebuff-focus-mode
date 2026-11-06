@@ -416,7 +416,7 @@ const windowsCommand = secureCopy.document.querySelector('[data-desktop-win-comm
 
 const linuxCommand = secureCopy.document.querySelector('[data-desktop-linux-command]').textContent.trim();
 
-check('all four copy rows are on the page', secureCopy.copyButtons.length, 4);
+check('all five copy rows are on the page', secureCopy.copyButtons.length, 5);
 check('every copy button is labelled Copy', secureCopy.copyButtons.every((b) => b.textContent.trim() === 'Copy'), true);
 
 secureCopy.copyButtons[1].click();
@@ -443,6 +443,24 @@ check(
   copied !== command && /-desktop-linux\.sh/.test(copied || ''),
   true
 );
+
+// The terminal client has its own one-liner, and it is the fifth row: the
+// desktop tool and the CLI tool are different scripts, so a section that shared
+// a handler with the desktop panels would copy the wrong URL here.
+const cliCommand = secureCopy.document.querySelector('[data-cli-command]').textContent.trim();
+check('the terminal one-liner fetches the CLI tool', /downloads\/freebuff-cli-focus\.sh \| sh$/.test(cliCommand), true);
+check('the CLI section is on the page', secureCopy.document.querySelector('#cli') !== null, true);
+check(
+  'and it names the commands the tool actually has',
+  ['freebuff-cli-focus focus', 'freebuff-cli-focus focus 25m', 'freebuff-cli-focus status', 'freebuff-cli-focus scan', 'freebuff-cli-focus update', 'freebuff-cli-focus uninstall', 'freebuff-cli-focus unfocus'].every(
+    (name) => secureCopy.document.querySelector('#cli').textContent.includes(name),
+  ),
+  true,
+);
+copied = null;
+secureCopy.copyButtons[4].click();
+await settle();
+check('the CLI button copies its own one-liner', copied, cliCommand);
 
 copied = null;
 secureCopy.copyButtons[0].click();
